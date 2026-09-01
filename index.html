@@ -12,9 +12,204 @@
   >
 
   <link rel="stylesheet" href="styles.css">
+
+  <style>
+    .auth-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: #f8f8f8;
+    }
+
+    .auth-card {
+      width: min(420px, 100%);
+      background: #ffffff;
+      border: 1px solid #ececec;
+      border-top: 5px solid #dc0028;
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 12px 35px rgba(0,0,0,0.08);
+    }
+
+    .auth-card h1 {
+      margin: 0;
+      color: #333333;
+      font-size: 26px;
+    }
+
+    .auth-card p {
+      margin: 8px 0 24px;
+      color: #828282;
+      font-size: 14px;
+    }
+
+    .auth-field {
+      margin-bottom: 16px;
+    }
+
+    .auth-field label {
+      display: block;
+      margin-bottom: 6px;
+      color: #505050;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .auth-field input {
+      width: 100%;
+      height: 46px;
+      padding: 0 12px;
+      border: 1px solid #d9d9d9;
+      border-radius: 8px;
+      outline: none;
+      color: #333333;
+    }
+
+    .auth-field input:focus {
+      border-color: #dc0028;
+      box-shadow: 0 0 0 3px rgba(220,0,40,0.08);
+    }
+
+    .auth-submit {
+      width: 100%;
+      height: 46px;
+      margin-top: 4px;
+      border: 0;
+      border-radius: 8px;
+      background: #dc0028;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .auth-submit:hover {
+      background: #b90022;
+    }
+
+    .auth-error {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #fdecef;
+      color: #a10f2d;
+      font-size: 12px;
+    }
+
+    .auth-info {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid #ececec;
+      color: #969696;
+      font-size: 11px;
+    }
+
+    .user-area {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .user-email {
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #828282;
+      font-size: 12px;
+    }
+
+    .logout-button {
+      border: 1px solid #d9d9d9;
+      border-radius: 8px;
+      background: white;
+      padding: 7px 10px;
+      color: #505050;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .logout-button:hover {
+      border-color: #dc0028;
+      color: #dc0028;
+    }
+
+    @media (max-width: 700px) {
+      .user-email {
+        display: none;
+      }
+    }
+  </style>
 </head>
 
 <body>
+
+  <!-- =======================================================
+       LOGIN
+       ======================================================= -->
+
+  <div id="authScreen" class="auth-screen">
+
+    <div class="auth-card">
+
+      <h1>Module Finder</h1>
+
+      <p>
+        Sign in to access the module database.
+      </p>
+
+      <form id="loginForm">
+
+        <div class="auth-field">
+          <label for="loginEmail">Email</label>
+
+          <input
+            id="loginEmail"
+            type="email"
+            autocomplete="username"
+            required
+          >
+        </div>
+
+        <div class="auth-field">
+          <label for="loginPassword">Password</label>
+
+          <input
+            id="loginPassword"
+            type="password"
+            autocomplete="current-password"
+            required
+          >
+        </div>
+
+        <button
+          id="loginButton"
+          class="auth-submit"
+          type="submit"
+        >
+          Sign in
+        </button>
+
+        <div
+          id="loginError"
+          class="auth-error"
+          hidden
+        ></div>
+
+      </form>
+
+      <div class="auth-info">
+        Access is restricted to authorised users.
+      </div>
+
+    </div>
+
+  </div>
+
 
   <!-- =======================================================
        APP HEADER
@@ -29,20 +224,35 @@
         <div class="brand-copy">
           <div class="brand-title-row">
             <h1>Module Finder</h1>
-            <span class="version-badge">v1.0</span>
+            <span class="version-badge">v1.1</span>
           </div>
 
           <p>Search policy modules, wording and guidance</p>
         </div>
       </div>
 
-      <div class="header-status">
+      <div class="user-area">
+
         <span
           id="connectionStatus"
           class="connection-status connection-checking"
         >
           Connecting...
         </span>
+
+        <span
+          id="userEmail"
+          class="user-email"
+        ></span>
+
+        <button
+          id="logoutButton"
+          class="logout-button"
+          type="button"
+        >
+          Sign out
+        </button>
+
       </div>
 
     </div>
@@ -54,8 +264,6 @@
        ======================================================= -->
 
   <main class="app-main">
-
-    <!-- SEARCH PANEL -->
 
     <section class="search-panel">
 
@@ -93,7 +301,7 @@
                 <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
               </svg>
             </span>
- 
+
             <input
               id="searchInput"
               class="search-input"
@@ -177,8 +385,6 @@
 
       </form>
 
-
-      <!-- FILTERS -->
 
       <div class="filters-wrapper">
 
@@ -280,8 +486,6 @@
     </section>
 
 
-    <!-- RESULTS AREA -->
-
     <section class="results-section">
 
       <div class="results-toolbar">
@@ -310,8 +514,6 @@
 
       </div>
 
-
-      <!-- INITIAL / EMPTY / ERROR STATES -->
 
       <div id="loadingState" class="state-card" hidden>
 
@@ -403,8 +605,6 @@
       </div>
 
 
-      <!-- RESULTS CARDS -->
-
       <div
         id="resultsGrid"
         class="results-grid"
@@ -415,10 +615,6 @@
 
   </main>
 
-
-  <!-- =======================================================
-       MODULE DETAIL DRAWER
-       ======================================================= -->
 
   <div
     id="drawerBackdrop"
@@ -494,8 +690,6 @@
 
     <div class="drawer-content">
 
-      <!-- CLASSIFICATION -->
-
       <section class="detail-section">
 
         <h3>Classification</h3>
@@ -537,8 +731,6 @@
       </section>
 
 
-      <!-- WORDING -->
-
       <section class="detail-section">
 
         <div class="detail-section-header">
@@ -578,89 +770,45 @@
       </section>
 
 
-      <!-- GUIDELINES -->
-
       <section
         id="guidelinesSection"
         class="detail-section"
       >
-
         <h3>Guidelines</h3>
-
-        <div
-          id="detailGuidelines"
-          class="detail-text"
-        >
-          -
-        </div>
-
+        <div id="detailGuidelines" class="detail-text">-</div>
       </section>
 
-
-      <!-- EXPLANATION -->
 
       <section
         id="explanationSection"
         class="detail-section"
       >
-
         <h3>Explanation</h3>
-
-        <div
-          id="detailExplanation"
-          class="detail-text"
-        >
-          -
-        </div>
-
+        <div id="detailExplanation" class="detail-text">-</div>
       </section>
 
-
-      <!-- APPLICATION -->
 
       <section
         id="applicationSection"
         class="detail-section"
       >
-
         <h3>Application</h3>
-
-        <div
-          id="detailApplication"
-          class="detail-text"
-        >
-          -
-        </div>
-
+        <div id="detailApplication" class="detail-text">-</div>
       </section>
 
-
-      <!-- ELEMENT EXPLANATION -->
 
       <section
         id="elementExplanationSection"
         class="detail-section"
       >
-
         <h3>Element Explanation</h3>
-
-        <div
-          id="detailElementExplanation"
-          class="detail-text"
-        >
-          -
-        </div>
-
+        <div id="detailElementExplanation" class="detail-text">-</div>
       </section>
 
     </div>
 
   </aside>
 
-
-  <!-- =======================================================
-       TOAST
-       ======================================================= -->
 
   <div
     id="toast"
@@ -672,10 +820,6 @@
     Copied
   </div>
 
-
-  <!-- =======================================================
-       FOOTER
-       ======================================================= -->
 
   <footer class="app-footer">
 
@@ -689,10 +833,6 @@
 
   </footer>
 
-
-  <!-- =======================================================
-       APPLICATION SCRIPTS
-       ======================================================= -->
 
   <script src="config.js"></script>
 

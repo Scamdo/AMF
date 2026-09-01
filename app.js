@@ -695,6 +695,7 @@
     const q = String(query || "").trim().toLowerCase();
     const moduleId = String(module.module || "").toLowerCase();
 
+    // Exact module navigation always wins.
     if (moduleId === q) return 1000000;
     if (moduleId.startsWith(q)) return 900000;
 
@@ -706,30 +707,35 @@
     const semanticRank = Number(module.semantic_rank || 50);
 
     /*
-      v1.7:
-      Natural-language searches are semantic-first.
-      Keyword matching is only a small tie-breaker.
+      v1.8:
+      Natural-language searches are ranked by semantic similarity.
+      The semantic score is deliberately scaled so that a 1 percentage-point
+      similarity difference is worth more than any keyword tie-breaker.
+      Keyword matching therefore cannot reverse a genuine semantic advantage.
     */
     if (naturalLanguageQuery) {
       if (module.semantic_match) {
         const semanticScore =
-          600000 + Math.round(similarity * 250000);
+          600000 + Math.round(similarity * 300000);
 
+        // Maximum 1,000 points. A 1% semantic difference is worth ~3,000.
         const keywordTieBreaker = module.keyword_match
           ? Math.min(
-              8000,
-              Math.max(0, Math.round(keywordScore / 40))
+              1000,
+              Math.max(0, Math.round(keywordScore / 300))
             )
           : 0;
 
+        // Only resolves extremely close scores.
         const semanticRankTieBreaker =
-          Math.max(0, 1000 - semanticRank * 20);
+          Math.max(0, 100 - semanticRank);
 
         return semanticScore +
           keywordTieBreaker +
           semanticRankTieBreaker;
       }
 
+      // Keyword-only results remain available below semantic matches.
       if (module.keyword_match) {
         return 350000 +
           Math.min(keywordScore, 120000);
@@ -738,6 +744,10 @@
       return keywordScore;
     }
 
+    /*
+      Short / structured searches keep keyword-first behaviour:
+      module IDs, CRM, China, Dutch law, etc.
+    */
     if (module.keyword_match) {
       const semanticBoost = module.semantic_match
         ? Math.round(similarity * 40000)

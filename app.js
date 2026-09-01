@@ -37,7 +37,9 @@
     wordingMode: "display",
     currentUser: null,
     initialized: false,
-    recentModules: []
+    recentModules: [],
+    aiSearchAvailable: true,
+    lastSearchUsedAI: false
   };
 
   const el = {
@@ -52,6 +54,7 @@
 
     connectionStatus: document.getElementById("connectionStatus"),
     databaseSummary: document.getElementById("databaseSummary"),
+    aiSearchStatus: document.getElementById("aiSearchStatus"),
 
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
@@ -506,7 +509,9 @@
     }
 
     state.currentQuery = query;
+    state.lastSearchUsedAI = false;
     showLoading();
+    setAiSearchStatus("working");
 
     try {
       if (!el.includeInvalid.checked) {
@@ -515,6 +520,7 @@
         if (exactModule && exactModule.valid_flag === "N") {
           state.rawResults = [];
           state.displayedResults = [];
+          setAiSearchStatus("ready");
 
           showEmpty(
             `Exact module ${query} was found, but it is currently marked invalid / obsolete. ` +
@@ -524,24 +530,187 @@
         }
       }
 
-      const { data, error } = await db.rpc("search_modules", {
+      const keywordPromise = db.rpc("search_modules", {
         search_query: query,
         include_invalid: el.includeInvalid.checked,
         result_limit: 100
       });
 
-      if (error) throw error;
+      const semanticPromise = runSemanticSearch(query);
 
-      state.rawResults = (data || []).map(row => ({
-        ...row,
-        client_priority_score: calculateClientPriorityScore(row, query)
-      }));
+      const [keywordResult, semanticResult] = await Promise.allSettled([
+        keywordPromise,
+        semanticPromise
+      ]);
+
+      let keywordRows = [];
+      let semanticRows = [];
+
+      if (keywordResult.status === "fulfilled") {
+        const result = keywordResult.value;
+        if (result.error) throw result.error;
+        keywordRows = result.data || [];
+      } else {
+        throw keywordResult.reason;
+      }
+
+      if (semanticResult.status === "fulfilled") {
+        semanticRows = semanticResult.value || [];
+        state.aiSearchAvailable = true;
+        state.lastSearchUsedAI = true;
+        setAiSearchStatus("ready");
+      } else {
+        console.warn("AI semantic search unavailable:", semanticResult.reason);
+        state.aiSearchAvailable = false;
+        state.lastSearchUsedAI = false;
+        setAiSearchStatus("fallback");
+      }
+
+      state.rawResults = mergeHybridResults(
+        keywordRows,
+        semanticRows,
+        query
+      );
 
       applyFiltersAndSort();
     } catch (error) {
       console.error(error);
+      setAiSearchStatus("fallback");
       showError(error.message || "Search could not be completed.");
     }
+  }
+
+  async function runSemanticSearch(query) {
+    const { data, error } = await db.functions.invoke(
+      "amf-ai-search",
+      {
+        body: {
+          query,
+          include_invalid: el.includeInvalid.checked,
+          match_count: 20
+        }
+      }
+    );
+
+    if (error) throw error;
+
+    if (!data || !Array.isArray(data.results)) {
+      throw new Error("AI search returned an invalid response.");
+    }
+
+    return data.results
+      .filter(row => Number(row.similarity || 0) >= 0.30)
+      .map((row, index) => ({
+        ...row,
+        semantic_similarity: Number(row.similarity || 0),
+        semantic_rank: index + 1
+      }));
+  }
+
+  function mergeHybridResults(keywordRows, semanticRows, query) {
+    const merged = new Map();
+
+    keywordRows.forEach((row, index) => {
+      const key = String(row.id);
+
+      merged.set(key, {
+        ...row,
+        keyword_rank: index + 1,
+        keyword_match: true,
+        semantic_match: false,
+        semantic_similarity: null,
+        semantic_rank: null
+      });
+    });
+
+    semanticRows.forEach((row, index) => {
+      const key = String(row.id);
+      const existing = merged.get(key);
+
+      if (existing) {
+        merged.set(key, {
+          ...existing,
+          semantic_match: true,
+          semantic_similarity: Number(row.semantic_similarity || row.similarity || 0),
+          semantic_rank: row.semantic_rank || index + 1
+        });
+      } else {
+        merged.set(key, {
+          ...row,
+          search_score: 0,
+          keyword_rank: null,
+          keyword_match: false,
+          semantic_match: true,
+          semantic_similarity: Number(row.semantic_similarity || row.similarity || 0),
+          semantic_rank: row.semantic_rank || index + 1
+        });
+      }
+    });
+
+    return Array.from(merged.values()).map(row => ({
+      ...row,
+      client_priority_score: calculateHybridPriorityScore(row, query)
+    }));
+  }
+
+  function calculateHybridPriorityScore(module, query) {
+    const q = String(query || "").trim().toLowerCase();
+    const moduleId = String(module.module || "").toLowerCase();
+
+    if (moduleId === q) return 1000000;
+    if (moduleId.startsWith(q)) return 900000;
+
+    const baseKeywordScore = calculateClientPriorityScore(module, query);
+
+    if (module.keyword_match) {
+      const semanticBoost = module.semantic_match
+        ? Math.round(Number(module.semantic_similarity || 0) * 50000)
+        : 0;
+
+      return baseKeywordScore + semanticBoost;
+    }
+
+    if (module.semantic_match) {
+      const similarity = Number(module.semantic_similarity || 0);
+      const rankBoost = Math.max(
+        0,
+        20000 - Number(module.semantic_rank || 20) * 500
+      );
+
+      return 300000 +
+        Math.round(similarity * 100000) +
+        rankBoost;
+    }
+
+    return baseKeywordScore;
+  }
+
+  function setAiSearchStatus(mode) {
+    if (!el.aiSearchStatus) return;
+
+    el.aiSearchStatus.classList.remove(
+      "ai-ready",
+      "ai-working",
+      "ai-fallback"
+    );
+
+    if (mode === "working") {
+      el.aiSearchStatus.classList.add("ai-working");
+      el.aiSearchStatus.textContent = "AI Search…";
+      el.aiSearchStatus.title = "Hybrid keyword + semantic search is running";
+      return;
+    }
+
+    if (mode === "fallback") {
+      el.aiSearchStatus.classList.add("ai-fallback");
+      el.aiSearchStatus.textContent = "Keyword Search";
+      el.aiSearchStatus.title = "AI semantic search unavailable - keyword search remains active";
+      return;
+    }
+
+    el.aiSearchStatus.classList.add("ai-ready");
+    el.aiSearchStatus.textContent = "AI Search";
+    el.aiSearchStatus.title = "Hybrid keyword + semantic search";
   }
 
   async function findExactModule(query) {
@@ -704,7 +873,14 @@
     el.resultsTitle.textContent = state.currentQuery ? "Search results" : "Modules";
     el.resultsMeta.textContent =
       `${count.toLocaleString()} module${count === 1 ? "" : "s"}` +
-      (state.currentQuery ? ` found for "${state.currentQuery}"` : " shown");
+      (state.currentQuery ? ` found for "${state.currentQuery}"` : " shown") +
+      (
+        state.currentQuery && state.lastSearchUsedAI
+          ? " · Hybrid keyword + AI semantic search"
+          : state.currentQuery
+            ? " · Keyword search"
+            : ""
+      );
 
     state.displayedResults.forEach(module => {
       el.resultsGrid.appendChild(createModuleCard(module));
@@ -744,6 +920,17 @@
     validity.textContent = module.valid_flag === "Y" ? "Valid" : "Invalid";
 
     numberLine.append(moduleNumber, validity);
+
+    if (module.semantic_match) {
+      const semanticBadge = document.createElement("span");
+      semanticBadge.className = "semantic-badge";
+      semanticBadge.textContent =
+        module.keyword_match ? "AI boosted" : "Semantic match";
+      semanticBadge.title = module.keyword_match
+        ? "This result matched both the normal search and the AI semantic search."
+        : "This result was found through semantic similarity.";
+      numberLine.appendChild(semanticBadge);
+    }
 
     const title = document.createElement("h3");
     title.className = "module-description";
@@ -879,9 +1066,29 @@
     const best = candidates[0];
 
     if (!best || (best.tokenMatches === 0 && !best.phraseMatch)) {
+      if (module.semantic_match) {
+        const semanticPreferredFields = [
+          ["Explanation", module.explanation],
+          ["Guidelines", module.guidelines],
+          ["Module description", module.module_description],
+          ["Element description", module.element_description],
+          ["Wording", module.wording]
+        ];
+
+        for (const [label, value] of semanticPreferredFields) {
+          if (hasText(value)) {
+            return {
+              label: `AI context · ${label}`,
+              text: value
+            };
+          }
+        }
+      }
+
       for (const [label, value] of fields) {
         if (hasText(value)) return { label, text: value };
       }
+
       return { label: "", text: "" };
     }
 

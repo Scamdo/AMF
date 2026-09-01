@@ -1316,3 +1316,10 @@ body.drawer-open { overflow: hidden; }
   .top5-copy-wrap { margin-right: 0; }
   .top5-menu { right: auto; left: 0; }
 }
+
+
+/* v1.6 - semantic-first ranking */
+.ai-search-status.ai-ready {
+  border-color: rgba(46, 139, 87, .18);
+  background: rgba(46, 139, 87, .04);
+}

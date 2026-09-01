@@ -637,7 +637,7 @@
     }
 
     return data.results
-      .filter(row => Number(row.similarity || 0) >= 0.30)
+      .filter(row => Number(row.similarity || 0) >= 0.40)
       .map((row, index) => ({
         ...row,
         semantic_similarity: Number(row.similarity || 0),
@@ -698,29 +698,55 @@
     if (moduleId === q) return 1000000;
     if (moduleId.startsWith(q)) return 900000;
 
-    const baseKeywordScore = calculateClientPriorityScore(module, query);
+    const meaningfulTokens = tokenizeQuery(query);
+    const naturalLanguageQuery = meaningfulTokens.length >= 4;
+
+    const keywordScore = calculateClientPriorityScore(module, query);
+    const similarity = Number(module.semantic_similarity || 0);
+    const semanticRank = Number(module.semantic_rank || 20);
+    const rankBoost = Math.max(0, 25000 - semanticRank * 750);
+
+    /*
+      Natural-language searches should be driven primarily by meaning.
+      Short searches such as "CRM", "China" or "Dutch law" still retain
+      stronger keyword influence.
+    */
+    if (naturalLanguageQuery) {
+      if (module.semantic_match && module.keyword_match) {
+        return 800000 +
+          Math.round(similarity * 120000) +
+          rankBoost;
+      }
+
+      if (module.semantic_match) {
+        return 760000 +
+          Math.round(similarity * 120000) +
+          rankBoost;
+      }
+
+      if (module.keyword_match) {
+        return 500000 +
+          Math.min(keywordScore, 180000);
+      }
+
+      return keywordScore;
+    }
 
     if (module.keyword_match) {
       const semanticBoost = module.semantic_match
-        ? Math.round(Number(module.semantic_similarity || 0) * 50000)
+        ? Math.round(similarity * 50000)
         : 0;
 
-      return baseKeywordScore + semanticBoost;
+      return keywordScore + semanticBoost;
     }
 
     if (module.semantic_match) {
-      const similarity = Number(module.semantic_similarity || 0);
-      const rankBoost = Math.max(
-        0,
-        20000 - Number(module.semantic_rank || 20) * 500
-      );
-
       return 300000 +
         Math.round(similarity * 100000) +
         rankBoost;
     }
 
-    return baseKeywordScore;
+    return keywordScore;
   }
 
   function setAiSearchStatus(mode) {

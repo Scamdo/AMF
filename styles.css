@@ -501,7 +501,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
     minmax(150px, .8fr)
     minmax(100px, .55fr)
     minmax(110px, .6fr)
-    minmax(210px, 1fr);
+    minmax(210px, 1fr)
+    minmax(150px, .8fr)
+    minmax(160px, .9fr)
+    minmax(170px, .95fr);
   gap: 14px;
   align-items: end;
   margin-top: 16px;
@@ -1173,4 +1176,21 @@ body.drawer-open { overflow: hidden; }
     padding-left: 18px;
     padding-right: 18px;
   }
+}
+
+
+/* v1.3 - search quality */
+.match-label {
+  width: fit-content;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #f3f3f3;
+}
+
+.module-card-exact {
+  border-color: rgba(220, 0, 40, .28);
+}
+
+.module-card-exact::before {
+  background: var(--red);
 }

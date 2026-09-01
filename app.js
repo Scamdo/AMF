@@ -68,6 +68,9 @@
     csmFilter: document.getElementById("csmFilter"),
     reuseFilter: document.getElementById("reuseFilter"),
     includeInvalid: document.getElementById("includeInvalid"),
+    hasWording: document.getElementById("hasWording"),
+    hasGuidelines: document.getElementById("hasGuidelines"),
+    hasExplanation: document.getElementById("hasExplanation"),
 
     sortSelect: document.getElementById("sortSelect"),
 
@@ -210,7 +213,10 @@
       el.elementFilter,
       el.componentFilter,
       el.csmFilter,
-      el.reuseFilter
+      el.reuseFilter,
+      el.hasWording,
+      el.hasGuidelines,
+      el.hasExplanation
     ].forEach(control => {
       control.addEventListener("change", () => {
         updateActiveFilterCount();
@@ -369,7 +375,12 @@
           component,
           csm,
           reuse_ind,
-          valid_flag
+          valid_flag,
+          wording,
+          guidelines,
+          explanation,
+          application,
+          element_explanation
         `)
         .range(from, from + pageSize - 1);
 
@@ -498,6 +509,21 @@
     showLoading();
 
     try {
+      if (!el.includeInvalid.checked) {
+        const exactModule = await findExactModule(query);
+
+        if (exactModule && exactModule.valid_flag === "N") {
+          state.rawResults = [];
+          state.displayedResults = [];
+
+          showEmpty(
+            `Exact module ${query} was found, but it is currently marked invalid / obsolete. ` +
+            `Enable "Include invalid / obsolete" to view it.`
+          );
+          return;
+        }
+      }
+
       const { data, error } = await db.rpc("search_modules", {
         search_query: query,
         include_invalid: el.includeInvalid.checked,
@@ -506,25 +532,31 @@
 
       if (error) throw error;
 
-      state.rawResults = data || [];
-
-      if (state.rawResults.length === 0 && !el.includeInvalid.checked) {
-        const invalidExact = await findInvalidExactModule(query);
-
-        if (invalidExact) {
-          showEmpty(
-            `Module ${query} exists, but it is currently marked invalid / obsolete. ` +
-            `Enable "Include invalid / obsolete" to view it.`
-          );
-          return;
-        }
-      }
+      state.rawResults = (data || []).map(row => ({
+        ...row,
+        client_priority_score: calculateClientPriorityScore(row, query)
+      }));
 
       applyFiltersAndSort();
     } catch (error) {
       console.error(error);
       showError(error.message || "Search could not be completed.");
     }
+  }
+
+  async function findExactModule(query) {
+    const { data, error } = await db
+      .from("modules")
+      .select("id,module,valid_flag")
+      .eq("module", query)
+      .limit(1);
+
+    if (error) {
+      console.warn(error);
+      return null;
+    }
+
+    return data && data.length ? data[0] : null;
   }
 
   async function findInvalidExactModule(query) {
@@ -601,6 +633,9 @@
     const csm = el.csmFilter.value;
     const reuse = el.reuseFilter.value;
     const includeInvalid = el.includeInvalid.checked;
+    const hasWording = el.hasWording.checked;
+    const hasGuidelines = el.hasGuidelines.checked;
+    const hasExplanation = el.hasExplanation.checked;
 
     if (!includeInvalid) results = results.filter(row => row.valid_flag === "Y");
     if (elementType) results = results.filter(row => row.element_type === elementType);
@@ -608,6 +643,9 @@
     if (component) results = results.filter(row => row.component === component);
     if (csm) results = results.filter(row => row.csm === csm);
     if (reuse) results = results.filter(row => row.reuse_ind === reuse);
+    if (hasWording) results = results.filter(row => hasText(row.wording));
+    if (hasGuidelines) results = results.filter(row => hasText(row.guidelines));
+    if (hasExplanation) results = results.filter(row => hasText(row.explanation));
 
     const sort = el.sortSelect.value;
 
@@ -624,9 +662,23 @@
     }
 
     if (sort === "relevance" && state.currentQuery) {
-      results.sort(
-        (a, b) => Number(b.search_score || 0) - Number(a.search_score || 0)
-      );
+      results.sort((a, b) => {
+        const aPriority = Number(
+          a.client_priority_score ??
+          calculateClientPriorityScore(a, state.currentQuery)
+        );
+
+        const bPriority = Number(
+          b.client_priority_score ??
+          calculateClientPriorityScore(b, state.currentQuery)
+        );
+
+        if (bPriority !== aPriority) {
+          return bPriority - aPriority;
+        }
+
+        return Number(b.search_score || 0) - Number(a.search_score || 0);
+      });
     }
 
     state.displayedResults = results;
@@ -661,7 +713,15 @@
 
   function createModuleCard(module) {
     const card = document.createElement("article");
-    card.className = "module-card" + (module.valid_flag === "N" ? " module-card-invalid" : "");
+    const exactMatch =
+      state.currentQuery &&
+      String(module.module || "").toLowerCase() === state.currentQuery.toLowerCase();
+
+    card.className =
+      "module-card" +
+      (module.valid_flag === "N" ? " module-card-invalid" : "") +
+      (exactMatch ? " module-card-exact" : "");
+
     card.tabIndex = 0;
 
     const top = document.createElement("div");
@@ -772,35 +832,63 @@
 
   function selectBestSnippet(module, query) {
     const fields = [
-      ["Module description", module.module_description],
-      ["Guidelines", module.guidelines],
-      ["Element description", module.element_description],
-      ["Explanation", module.explanation],
-      ["Wording", module.wording],
-      ["Application", module.application],
-      ["Element explanation", module.element_explanation]
+      ["Module number", module.module, 100],
+      ["Module description", module.module_description, 90],
+      ["Guidelines", module.guidelines, 80],
+      ["Element description", module.element_description, 75],
+      ["Explanation", module.explanation, 70],
+      ["Wording", module.wording, 60],
+      ["Application", module.application, 50],
+      ["Element explanation", module.element_explanation, 40]
     ];
 
     if (!query) {
       for (const [label, value] of fields) {
-        if (value) return { label, text: value };
+        if (hasText(value)) return { label, text: value };
       }
       return { label: "", text: "" };
     }
 
-    const normalizedQuery = query.toLowerCase();
+    const phrase = query.trim().toLowerCase();
+    const tokens = tokenizeQuery(query);
 
-    for (const [label, value] of fields) {
-      if (value && String(value).toLowerCase().includes(normalizedQuery)) {
-        return { label, text: value };
+    const candidates = fields
+      .filter(([, value]) => hasText(value))
+      .map(([label, value, weight]) => {
+        const lower = String(value).toLowerCase();
+        const phraseMatch = phrase && lower.includes(phrase);
+        const tokenMatches = tokens.filter(token => lower.includes(token)).length;
+        const allTokens = tokens.length > 0 && tokenMatches === tokens.length;
+
+        let score = weight;
+
+        if (phraseMatch) score += 1000;
+        else if (allTokens) score += 700;
+        else score += tokenMatches * 100;
+
+        return {
+          label,
+          text: value,
+          score,
+          phraseMatch,
+          tokenMatches
+        };
+      })
+      .sort((a, b) => b.score - a.score);
+
+    const best = candidates[0];
+
+    if (!best || (best.tokenMatches === 0 && !best.phraseMatch)) {
+      for (const [label, value] of fields) {
+        if (hasText(value)) return { label, text: value };
       }
+      return { label: "", text: "" };
     }
 
-    for (const [label, value] of fields) {
-      if (value) return { label, text: value };
-    }
-
-    return { label: "", text: "" };
+    return {
+      label: best.label,
+      text: best.text
+    };
   }
 
   function trimSnippet(text, query) {
@@ -826,28 +914,137 @@
   }
 
   function appendHighlightedText(container, text, query) {
-    if (!query) {
+    const tokens = tokenizeQuery(query);
+
+    if (!tokens.length) {
       container.textContent = text;
       return;
     }
 
-    const lower = text.toLowerCase();
-    const needle = query.toLowerCase();
+    const escapedTokens = tokens
+      .sort((a, b) => b.length - a.length)
+      .map(escapeRegExp);
+
+    const pattern = new RegExp(`(${escapedTokens.join("|")})`, "gi");
 
     let cursor = 0;
-    let index;
+    let match;
 
-    while ((index = lower.indexOf(needle, cursor)) !== -1) {
-      container.appendChild(document.createTextNode(text.slice(cursor, index)));
+    while ((match = pattern.exec(text)) !== null) {
+      container.appendChild(
+        document.createTextNode(text.slice(cursor, match.index))
+      );
 
       const mark = document.createElement("mark");
-      mark.textContent = text.slice(index, index + query.length);
+      mark.textContent = match[0];
       container.appendChild(mark);
 
-      cursor = index + query.length;
+      cursor = match.index + match[0].length;
     }
 
-    container.appendChild(document.createTextNode(text.slice(cursor)));
+    container.appendChild(
+      document.createTextNode(text.slice(cursor))
+    );
+  }
+
+  function calculateClientPriorityScore(module, query) {
+    const q = String(query || "").trim().toLowerCase();
+    if (!q) return Number(module.search_score || 0);
+
+    const moduleId = String(module.module || "").toLowerCase();
+    const description = String(module.module_description || "").toLowerCase();
+    const tokens = tokenizeQuery(q);
+
+    if (moduleId === q) return 1000000;
+    if (moduleId.startsWith(q)) return 900000;
+
+    if (description.includes(q)) {
+      return 800000 + weightedFieldMatchScore(module, tokens);
+    }
+
+    const searchable = [
+      module.module,
+      module.module_description,
+      module.guidelines,
+      module.element_description,
+      module.explanation,
+      module.wording,
+      module.application,
+      module.element_explanation
+    ]
+      .filter(hasText)
+      .join(" ")
+      .toLowerCase();
+
+    const allTokensMatch =
+      tokens.length > 0 &&
+      tokens.every(token => searchable.includes(token));
+
+    if (allTokensMatch) {
+      return 700000 + weightedFieldMatchScore(module, tokens);
+    }
+
+    const matchedTokens = tokens.filter(token => searchable.includes(token)).length;
+
+    if (matchedTokens > 0) {
+      return 600000 +
+        matchedTokens * 1000 +
+        weightedFieldMatchScore(module, tokens);
+    }
+
+    return Number(module.search_score || 0);
+  }
+
+  function weightedFieldMatchScore(module, tokens) {
+    if (!tokens.length) return 0;
+
+    const fields = [
+      [module.module, 100],
+      [module.module_description, 90],
+      [module.guidelines, 80],
+      [module.element_description, 75],
+      [module.explanation, 70],
+      [module.wording, 60],
+      [module.application, 50],
+      [module.element_explanation, 40]
+    ];
+
+    let total = 0;
+
+    fields.forEach(([value, weight]) => {
+      if (!hasText(value)) return;
+
+      const lower = String(value).toLowerCase();
+
+      tokens.forEach(token => {
+        if (lower.includes(token)) total += weight;
+      });
+    });
+
+    return total;
+  }
+
+  function tokenizeQuery(query) {
+    return Array.from(
+      new Set(
+        String(query || "")
+          .trim()
+          .toLowerCase()
+          .split(/\s+/)
+          .map(token => token.trim())
+          .filter(Boolean)
+      )
+    );
+  }
+
+  function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function hasText(value) {
+    return value !== null &&
+      value !== undefined &&
+      String(value).trim() !== "";
   }
 
   async function fetchFullModule(id) {
@@ -1000,6 +1197,9 @@
     el.csmFilter.value = "";
     el.reuseFilter.value = "";
     el.includeInvalid.checked = false;
+    el.hasWording.checked = false;
+    el.hasGuidelines.checked = false;
+    el.hasExplanation.checked = false;
 
     updateActiveFilterCount();
   }
@@ -1013,6 +1213,9 @@
     if (el.csmFilter.value) count++;
     if (el.reuseFilter.value) count++;
     if (el.includeInvalid.checked) count++;
+    if (el.hasWording.checked) count++;
+    if (el.hasGuidelines.checked) count++;
+    if (el.hasExplanation.checked) count++;
 
     el.activeFilterCount.textContent = count;
     el.activeFilterCount.hidden = count === 0;

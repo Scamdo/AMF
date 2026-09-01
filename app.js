@@ -28,6 +28,13 @@
   const RECENT_KEY = "amf_recent_modules_v1";
   const RECENT_LIMIT = 5;
 
+  const SEARCH_STOP_WORDS = new Set([
+    "a", "an", "the", "and", "or", "for", "of", "to", "by", "in", "on",
+    "at", "from", "with", "without", "under", "over", "into", "about",
+    "is", "are", "be", "being", "been", "that", "this", "these", "those",
+    "it", "its", "as", "than", "then", "which", "who", "whom", "whose"
+  ]);
+
   const state = {
     allMetadata: [],
     rawResults: [],
@@ -75,6 +82,10 @@
     hasGuidelines: document.getElementById("hasGuidelines"),
     hasExplanation: document.getElementById("hasExplanation"),
 
+    copyTop5Button: document.getElementById("copyTop5Button"),
+    top5Menu: document.getElementById("top5Menu"),
+    copyTop5Wording: document.getElementById("copyTop5Wording"),
+    copyTop5Full: document.getElementById("copyTop5Full"),
     sortSelect: document.getElementById("sortSelect"),
 
     resultsTitle: document.getElementById("resultsTitle"),
@@ -238,6 +249,33 @@
     });
 
     el.sortSelect.addEventListener("change", applyFiltersAndSort);
+
+    el.copyTop5Button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!state.displayedResults.length) return;
+      el.top5Menu.classList.toggle("hidden");
+    });
+
+    el.copyTop5Wording.addEventListener("click", async () => {
+      el.top5Menu.classList.add("hidden");
+      await copyTopFive("wording");
+    });
+
+    el.copyTop5Full.addEventListener("click", async () => {
+      el.top5Menu.classList.add("hidden");
+      await copyTopFive("full");
+    });
+
+    document.addEventListener("click", (event) => {
+      if (
+        el.top5Menu &&
+        el.copyTop5Button &&
+        !el.top5Menu.contains(event.target) &&
+        !el.copyTop5Button.contains(event.target)
+      ) {
+        el.top5Menu.classList.add("hidden");
+      }
+    });
 
     el.closeDrawerButton.addEventListener("click", closeDrawer);
     el.drawerBackdrop.addEventListener("click", closeDrawer);
@@ -852,6 +890,7 @@
 
     state.displayedResults = results;
     renderResults();
+    updateTop5ButtonState();
     updateActiveFilterCount();
   }
 
@@ -1232,14 +1271,20 @@
   }
 
   function tokenizeQuery(query) {
+    const rawTokens = String(query || "")
+      .trim()
+      .toLowerCase()
+      .split(/\s+/)
+      .map(token => token.trim())
+      .filter(Boolean);
+
+    const meaningfulTokens = rawTokens.filter(
+      token => token.length > 1 && !SEARCH_STOP_WORDS.has(token)
+    );
+
     return Array.from(
       new Set(
-        String(query || "")
-          .trim()
-          .toLowerCase()
-          .split(/\s+/)
-          .map(token => token.trim())
-          .filter(Boolean)
+        meaningfulTokens.length ? meaningfulTokens : rawTokens
       )
     );
   }
@@ -1505,6 +1550,190 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+
+  function updateTop5ButtonState() {
+    if (!el.copyTop5Button) return;
+
+    const count = Math.min(
+      5,
+      Array.isArray(state.displayedResults)
+        ? state.displayedResults.length
+        : 0
+    );
+
+    el.copyTop5Button.disabled = count === 0;
+    el.copyTop5Button.textContent =
+      count === 0 ? "Copy Top 5" : `Copy Top ${count}`;
+  }
+
+  async function copyTopFive(mode) {
+    const topRows = (state.displayedResults || []).slice(0, 5);
+    if (!topRows.length) return;
+
+    try {
+      const modules = await Promise.all(
+        topRows.map(row => fetchFullModule(row.id))
+      );
+
+      const validModules = modules.filter(Boolean);
+
+      if (!validModules.length) {
+        throw new Error("No modules could be loaded.");
+      }
+
+      const richHtml = buildTopFiveHtml(validModules, mode);
+      const plainText = buildTopFivePlainText(validModules, mode);
+
+      await copyRichText(richHtml, plainText);
+
+      showCopyConfirmation(
+        mode === "full"
+          ? `Copied Top ${validModules.length} with full details`
+          : `Copied Top ${validModules.length} wording`
+      );
+    } catch (error) {
+      console.error("Top 5 copy failed:", error);
+      showCopyConfirmation("Could not copy Top 5");
+    }
+  }
+
+  function buildTopFivePlainText(modules, mode) {
+    return modules
+      .map((module, index) => {
+        const title =
+          module.element_description ||
+          module.module_description ||
+          "Module";
+
+        const moduleNumber = module.module || "";
+        const parts = [
+          `${index + 1}. ${title} (${moduleNumber})`
+        ];
+
+        if (hasText(module.wording)) {
+          parts.push("", readableText(module.wording));
+        }
+
+        if (mode === "full") {
+          appendPlainSection(parts, "Guidelines", module.guidelines);
+          appendPlainSection(parts, "Explanation", module.explanation);
+          appendPlainSection(parts, "Application", module.application);
+          appendPlainSection(
+            parts,
+            "Element Explanation",
+            module.element_explanation
+          );
+        }
+
+        return parts.join("\\n");
+      })
+      .join("\\n\\n----------------------------------------\\n\\n");
+  }
+
+  function buildTopFiveHtml(modules, mode) {
+    return modules
+      .map((module, index) => {
+        const title =
+          module.element_description ||
+          module.module_description ||
+          "Module";
+
+        const moduleNumber = module.module || "";
+
+        const sections = [
+          `<div><strong>${escapeHtml(
+            `${index + 1}. ${title} (${moduleNumber})`
+          )}</strong></div>`
+        ];
+
+        if (hasText(module.wording)) {
+          sections.push(
+            `<div style="margin-top:10px;">${formatHtmlText(
+              readableText(module.wording)
+            )}</div>`
+          );
+        }
+
+        if (mode === "full") {
+          appendHtmlSection(sections, "Guidelines", module.guidelines);
+          appendHtmlSection(sections, "Explanation", module.explanation);
+          appendHtmlSection(sections, "Application", module.application);
+          appendHtmlSection(
+            sections,
+            "Element Explanation",
+            module.element_explanation
+          );
+        }
+
+        return `<div style="margin-bottom:22px;">${sections.join("")}</div>`;
+      })
+      .join('<hr style="border:0;border-top:1px solid #ccc;margin:18px 0;">');
+  }
+
+  function appendPlainSection(parts, label, value) {
+    if (!hasText(value)) return;
+
+    parts.push(
+      "",
+      `${label}:`,
+      readableText(value)
+    );
+  }
+
+  function appendHtmlSection(parts, label, value) {
+    if (!hasText(value)) return;
+
+    parts.push(
+      `<div style="margin-top:12px;"><strong>${escapeHtml(label)}:</strong><br>${formatHtmlText(
+        readableText(value)
+      )}</div>`
+    );
+  }
+
+  function formatHtmlText(value) {
+    return escapeHtml(String(value || ""))
+      .replace(/\r\n|\r|\n/g, "<br>");
+  }
+
+  async function copyRichText(html, plainText) {
+    if (
+      navigator.clipboard &&
+      window.ClipboardItem &&
+      navigator.clipboard.write
+    ) {
+      try {
+        const item = new ClipboardItem({
+          "text/html": new Blob([html], { type: "text/html" }),
+          "text/plain": new Blob([plainText], { type: "text/plain" })
+        });
+
+        await navigator.clipboard.write([item]);
+        return;
+      } catch (error) {
+        console.warn(
+          "Rich clipboard unavailable, falling back to plain text:",
+          error
+        );
+      }
+    }
+
+    await navigator.clipboard.writeText(plainText);
+  }
+
+  function showCopyConfirmation(message) {
+    const existing = document.querySelector(".copy-confirmation");
+    if (existing) existing.remove();
+
+    const toast = document.createElement("div");
+    toast.className = "copy-confirmation";
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    window.setTimeout(() => {
+      toast.remove();
+    }, 2200);
   }
 
   async function copyFullModule(module) {

@@ -45,7 +45,7 @@
         <div class="brand-copy">
           <div class="brand-title-row">
             <h1>Module Finder</h1>
-            <span class="version-badge">v1.4</span>
+            <span class="version-badge">v1.5</span>
           </div>
           <p>Search policy modules, wording and guidance</p>
         </div>
@@ -218,6 +218,16 @@
         </div>
 
         <div class="results-toolbar-right">
+          <div class="top5-copy-wrap">
+            <button id="copyTop5Button" class="secondary-button top5-main-button" type="button" disabled>
+              Copy Top 5
+            </button>
+            <div id="top5Menu" class="top5-menu hidden">
+              <button id="copyTop5Wording" type="button">Wording only</button>
+              <button id="copyTop5Full" type="button">Full details</button>
+            </div>
+          </div>
+
           <label for="sortSelect" class="sort-label">Sort</label>
           <select id="sortSelect" class="sort-select">
             <option value="relevance">Best match</option>

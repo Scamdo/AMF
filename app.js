@@ -244,31 +244,6 @@
     });
 
     el.copyWordingButton.addEventListener("click", async () => {
-  if (!state.currentModule) return;
-
-  const wording = state.currentModule.wording || "";
-
-  if (!wording) {
-    showToast("No wording available");
-    return;
-  }
-
-  const moduleDescription =
-    state.currentModule.module_description || "Module";
-
-  const moduleNumber =
-    state.currentModule.module || "";
-
-  const heading =
-    `${moduleDescription} ${moduleNumber}`.trim();
-
-  const textToCopy =
-    `${heading}\n\n${readableText(wording)}`;
-
-  await copyText(textToCopy);
-
-  showToast("Module wording copied");
-});("click", async () => {
       if (!state.currentModule) return;
 
       const wording = state.currentModule.wording || "";
@@ -278,8 +253,65 @@
         return;
       }
 
-      await copyText(wording);
-      showToast("Exact wording copied");
+      const moduleDescription =
+        state.currentModule.module_description || "Module";
+
+      const moduleNumber =
+        state.currentModule.module || "";
+
+      const heading =
+        `${moduleDescription} (${moduleNumber})`;
+
+      const readableWording =
+        readableText(wording);
+
+      const plainText =
+        `${heading}\n\n${readableWording}`;
+
+      const htmlWording =
+        escapeHtml(readableWording)
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n")
+          .replace(/\n/g, "<br>");
+
+      const htmlContent =
+        `<strong>${escapeHtml(heading)}</strong>` +
+        `<br><br>` +
+        htmlWording;
+
+      try {
+        if (
+          navigator.clipboard &&
+          window.ClipboardItem
+        ) {
+          const clipboardItem = new ClipboardItem({
+            "text/plain": new Blob(
+              [plainText],
+              { type: "text/plain" }
+            ),
+            "text/html": new Blob(
+              [htmlContent],
+              { type: "text/html" }
+            )
+          });
+
+          await navigator.clipboard.write([
+            clipboardItem
+          ]);
+
+          showToast("Module wording copied");
+          return;
+        }
+
+        await copyText(plainText);
+        showToast("Module wording copied");
+
+      } catch (error) {
+        console.error(error);
+
+        await copyText(plainText);
+        showToast("Module wording copied");
+      }
     });
 
     el.displayWordingButton.addEventListener("click", () => {
@@ -1373,6 +1405,16 @@
   function updateClearButton() {
     el.clearSearchButton.hidden =
       !el.searchInput.value;
+  }
+
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 
 

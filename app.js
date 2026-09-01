@@ -147,7 +147,7 @@
 
   function installFeedbackUi() {
     const versionBadge = document.querySelector(".version-badge");
-    if (versionBadge) versionBadge.textContent = "v2.0";
+    if (versionBadge) versionBadge.textContent = "v2.1";
 
     if (!document.getElementById("feedbackAdminButton")) {
       const logoutButton = document.getElementById("logoutButton");
@@ -835,24 +835,52 @@
     });
 
     const feedbackByModule = new Map();
+
     feedbackMemoryRows.forEach(memory => {
       const moduleId = String(memory.preferred_module_id || "");
       if (!moduleId) return;
+
       const existing = feedbackByModule.get(moduleId);
-      if (!existing || Number(memory.similarity || 0) > Number(existing.similarity || 0)) {
+      if (
+        !existing ||
+        Number(memory.similarity || 0) > Number(existing.similarity || 0)
+      ) {
         feedbackByModule.set(moduleId, memory);
       }
     });
 
     feedbackByModule.forEach((memory, moduleId) => {
+      const memorySimilarity = Number(memory.similarity || 0);
       const existing = merged.get(moduleId);
+
       if (existing) {
         merged.set(moduleId, {
           ...existing,
           feedback_memory_match: true,
-          feedback_memory_similarity: Number(memory.similarity || 0)
+          feedback_memory_similarity: memorySimilarity,
+          feedback_candidate_injected: false
         });
+        return;
       }
+
+      const metadataRow = state.allMetadata.find(
+        row => String(row.id) === moduleId
+      );
+
+      if (!metadataRow) return;
+
+      merged.set(moduleId, {
+        ...metadataRow,
+        search_score: 0,
+        keyword_rank: null,
+        keyword_match: false,
+        semantic_match: false,
+        semantic_similarity: null,
+        semantic_rank: null,
+        feedback_memory_match: true,
+        feedback_memory_similarity: memorySimilarity,
+        feedback_candidate_injected: true
+      });
     });
 
     return Array.from(merged.values()).map(row => ({
@@ -884,6 +912,37 @@
       Keyword matching therefore cannot reverse a genuine semantic advantage.
     */
     if (naturalLanguageQuery) {
+      /*
+        v2.1:
+        Approved expert memory is a first-class ranking signal.
+        This also allows a preferred module that was missing from the base
+        semantic/keyword candidate set to enter the ranking.
+      */
+      if (
+        module.feedback_memory_match &&
+        Number(module.feedback_memory_similarity || 0) >= 0.82
+      ) {
+        const memorySimilarity =
+          Number(module.feedback_memory_similarity || 0);
+
+        const memoryScore =
+          600000 +
+          Math.round(memorySimilarity * 300000) +
+          15000;
+
+        if (!module.semantic_match) {
+          return memoryScore;
+        }
+
+        const semanticScoreForComparison =
+          600000 +
+          Math.round(similarity * 300000);
+
+        if (memoryScore > semanticScoreForComparison) {
+          return memoryScore;
+        }
+      }
+
       if (module.semantic_match) {
         const semanticScore =
           600000 + Math.round(similarity * 300000);
@@ -900,19 +959,9 @@
         const semanticRankTieBreaker =
           Math.max(0, 100 - semanticRank);
 
-        const feedbackBoost =
-          module.feedback_memory_match &&
-          Number(module.feedback_memory_similarity || 0) >= 0.82
-            ? Math.min(
-                12000,
-                Math.round((Number(module.feedback_memory_similarity || 0) - 0.82) * 60000) + 1500
-              )
-            : 0;
-
         return semanticScore +
           keywordTieBreaker +
-          semanticRankTieBreaker +
-          feedbackBoost;
+          semanticRankTieBreaker;
       }
 
       // Keyword-only results remain available below semantic matches.
@@ -1204,8 +1253,12 @@
     if (module.feedback_memory_match) {
       const memoryBadge = document.createElement("span");
       memoryBadge.className = "feedback-memory-badge";
-      memoryBadge.textContent = "Expert learned";
-      memoryBadge.title = "Approved expert feedback from a similar previous search contributed to this ranking.";
+      memoryBadge.textContent = module.feedback_candidate_injected
+        ? "Expert candidate"
+        : "Expert learned";
+      memoryBadge.title = module.feedback_candidate_injected
+        ? "This module was added to the candidate set because approved expert feedback matched this search."
+        : "Approved expert feedback from a similar previous search contributed to this ranking.";
       numberLine.appendChild(memoryBadge);
     }
 

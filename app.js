@@ -144,6 +144,143 @@
     toast: document.getElementById("toast")
   };
 
+
+  function installFeedbackUi() {
+    const versionBadge = document.querySelector(".version-badge");
+    if (versionBadge) versionBadge.textContent = "v2.0";
+
+    if (!document.getElementById("feedbackAdminButton")) {
+      const logoutButton = document.getElementById("logoutButton");
+      const button = document.createElement("button");
+      button.id = "feedbackAdminButton";
+      button.className = "logout-button";
+      button.type = "button";
+      button.textContent = "Feedback";
+      button.hidden = true;
+      logoutButton.parentNode.insertBefore(button, logoutButton);
+    }
+
+    document.body.insertAdjacentHTML("beforeend", `
+      <div id="feedbackModalBackdrop" class="feedback-modal-backdrop" hidden></div>
+      <section id="feedbackModal" class="feedback-modal" hidden aria-modal="true" role="dialog">
+        <div class="feedback-modal-header">
+          <div>
+            <h2 id="feedbackModalTitle">Expert feedback</h2>
+            <p id="feedbackModalSubtitle">Help improve future module ranking.</p>
+          </div>
+          <button id="feedbackModalClose" class="drawer-close-button" type="button" aria-label="Close feedback">×</button>
+        </div>
+
+        <div id="feedbackEntryView" class="feedback-modal-body">
+          <div class="feedback-query-box">
+            <span>Search query</span>
+            <strong id="feedbackQueryText">-</strong>
+          </div>
+
+          <div class="feedback-field">
+            <label for="feedbackSuggestedModule">Result being corrected</label>
+            <input id="feedbackSuggestedModule" type="text" readonly>
+          </div>
+
+          <div class="feedback-field">
+            <label for="feedbackBetterModule">Better module</label>
+            <input id="feedbackBetterModule" type="text" placeholder="e.g. 43100.00" autocomplete="off">
+            <div id="feedbackBetterModuleHint" class="feedback-hint"></div>
+          </div>
+
+          <div class="feedback-field">
+            <label for="feedbackComment">Expert comment <span>(optional)</span></label>
+            <textarea id="feedbackComment" rows="4" placeholder="Why is this module a better answer?"></textarea>
+          </div>
+
+          <div class="feedback-modal-actions">
+            <button id="feedbackCancelButton" class="secondary-button" type="button">Cancel</button>
+            <button id="feedbackSubmitButton" class="primary-button compact-button" type="button">Save feedback</button>
+          </div>
+        </div>
+
+        <div id="feedbackAdminView" class="feedback-modal-body" hidden>
+          <div class="feedback-admin-toolbar">
+            <div>
+              <strong>Pending expert feedback</strong>
+              <p>Only approved feedback can influence ranking.</p>
+            </div>
+            <button id="feedbackRefreshButton" class="secondary-button" type="button">Refresh</button>
+          </div>
+          <div id="feedbackAdminList" class="feedback-admin-list"></div>
+        </div>
+      </section>`);
+
+    const style = document.createElement("style");
+    style.textContent = `
+      .feedback-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border-soft)}
+      .feedback-good-button,.feedback-better-button{border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);padding:7px 10px;font-size:12px;font-weight:700}
+      .feedback-good-button:hover{border-color:#2e8b57;color:#1f6b43}
+      .feedback-better-button:hover{border-color:var(--red);color:var(--red)}
+      .feedback-memory-badge{display:inline-flex;align-items:center;min-height:24px;padding:2px 8px;border-radius:999px;border:1px solid rgba(46,139,87,.22);background:rgba(46,139,87,.07);color:#1f6b43;font-size:11px;font-weight:800;white-space:nowrap}
+      .feedback-modal-backdrop{position:fixed;inset:0;z-index:290;background:rgba(0,0,0,.32)}
+      .feedback-modal{position:fixed;left:50%;top:50%;z-index:300;width:min(760px,calc(100vw - 32px));max-height:min(820px,calc(100vh - 40px));transform:translate(-50%,-50%);overflow:hidden;border:1px solid var(--border-soft);border-top:5px solid var(--red);border-radius:var(--radius-lg);background:var(--surface);box-shadow:0 22px 60px rgba(0,0,0,.20)}
+      .feedback-modal-header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;padding:22px 24px 18px;border-bottom:1px solid var(--border-soft)}
+      .feedback-modal-header h2{margin:0;color:var(--text-dark);font-size:20px}
+      .feedback-modal-header p{margin:4px 0 0;color:var(--text-soft);font-size:12px}
+      .feedback-modal-body{padding:22px 24px 24px;overflow:auto;max-height:calc(100vh - 150px)}
+      .feedback-query-box{padding:12px 14px;margin-bottom:18px;border-radius:var(--radius-sm);background:var(--surface-soft)}
+      .feedback-query-box span{display:block;color:var(--text-soft);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+      .feedback-query-box strong{color:var(--text-dark);font-size:13px}
+      .feedback-field{margin-bottom:16px}
+      .feedback-field label{display:block;margin-bottom:6px;color:var(--text);font-size:12px;font-weight:700}
+      .feedback-field label span{color:var(--text-soft);font-weight:400}
+      .feedback-field input,.feedback-field textarea{width:100%;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-dark);padding:10px 11px;outline:none}
+      .feedback-field input:focus,.feedback-field textarea:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(220,0,40,.08)}
+      .feedback-field input[readonly]{background:var(--surface-soft);color:var(--text-soft)}
+      .feedback-hint{min-height:18px;margin-top:5px;color:var(--text-soft);font-size:11px}
+      .feedback-hint-ok{color:var(--success-text)}
+      .feedback-hint-error{color:var(--danger-text)}
+      .feedback-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+      .feedback-admin-toolbar{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px}
+      .feedback-admin-toolbar p{margin:3px 0 0;color:var(--text-soft);font-size:12px}
+      .feedback-admin-list{display:grid;gap:10px}
+      .feedback-admin-card{border:1px solid var(--border-soft);border-radius:var(--radius-md);padding:14px;background:var(--surface-soft)}
+      .feedback-admin-card h3{margin:0 0 7px;color:var(--text-dark);font-size:14px}
+      .feedback-admin-card p{margin:5px 0;font-size:12px}
+      .feedback-admin-meta{color:var(--text-soft);font-size:11px}
+      .feedback-admin-actions{display:flex;gap:8px;margin-top:12px}
+      .feedback-admin-empty{padding:22px;text-align:center;color:var(--text-soft);border:1px dashed var(--border);border-radius:var(--radius-md);font-size:13px}
+      @media(max-width:620px){
+        .feedback-modal-header,.feedback-modal-body{padding-left:18px;padding-right:18px}
+        .feedback-admin-toolbar{flex-direction:column}
+      }`;
+    document.head.appendChild(style);
+
+    Object.assign(el, {
+      feedbackAdminButton: document.getElementById("feedbackAdminButton"),
+      feedbackModalBackdrop: document.getElementById("feedbackModalBackdrop"),
+      feedbackModal: document.getElementById("feedbackModal"),
+      feedbackModalTitle: document.getElementById("feedbackModalTitle"),
+      feedbackModalSubtitle: document.getElementById("feedbackModalSubtitle"),
+      feedbackModalClose: document.getElementById("feedbackModalClose"),
+      feedbackEntryView: document.getElementById("feedbackEntryView"),
+      feedbackAdminView: document.getElementById("feedbackAdminView"),
+      feedbackQueryText: document.getElementById("feedbackQueryText"),
+      feedbackSuggestedModule: document.getElementById("feedbackSuggestedModule"),
+      feedbackBetterModule: document.getElementById("feedbackBetterModule"),
+      feedbackBetterModuleHint: document.getElementById("feedbackBetterModuleHint"),
+      feedbackComment: document.getElementById("feedbackComment"),
+      feedbackCancelButton: document.getElementById("feedbackCancelButton"),
+      feedbackSubmitButton: document.getElementById("feedbackSubmitButton"),
+      feedbackRefreshButton: document.getElementById("feedbackRefreshButton"),
+      feedbackAdminList: document.getElementById("feedbackAdminList")
+    });
+
+    el.feedbackModalClose.addEventListener("click", closeFeedbackModal);
+    el.feedbackModalBackdrop.addEventListener("click", closeFeedbackModal);
+    el.feedbackCancelButton.addEventListener("click", closeFeedbackModal);
+    el.feedbackSubmitButton.addEventListener("click", submitBetterModuleFeedback);
+    el.feedbackBetterModule.addEventListener("input", validateBetterModuleInput);
+    el.feedbackAdminButton.addEventListener("click", openFeedbackAdmin);
+    el.feedbackRefreshButton.addEventListener("click", loadPendingFeedback);
+  }
+
   async function init() {
     installFeedbackUi();
     bindEvents();

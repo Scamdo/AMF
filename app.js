@@ -1,8 +1,3 @@
-/* ============================================================
-   AMF - Module Finder
-   Application logic v1.0
-   ============================================================ */
-
 (() => {
   "use strict";
 
@@ -20,12 +15,16 @@
 
   const db = window.supabase.createClient(
     CONFIG.SUPABASE_URL,
-    CONFIG.SUPABASE_PUBLISHABLE_KEY
+    CONFIG.SUPABASE_PUBLISHABLE_KEY,
+    {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    }
   );
 
-  /* ============================================================
-     STATE
-     ============================================================ */
 
   const state = {
     allMetadata: [],
@@ -34,21 +33,28 @@
     currentQuery: "",
     currentModule: null,
     wordingMode: "display",
+    currentUser: null,
     initialized: false
   };
 
-  /* ============================================================
-     DOM
-     ============================================================ */
 
   const el = {
+    authScreen: document.getElementById("authScreen"),
+    loginForm: document.getElementById("loginForm"),
+    loginEmail: document.getElementById("loginEmail"),
+    loginPassword: document.getElementById("loginPassword"),
+    loginButton: document.getElementById("loginButton"),
+    loginError: document.getElementById("loginError"),
+
+    logoutButton: document.getElementById("logoutButton"),
+    userEmail: document.getElementById("userEmail"),
+
     connectionStatus: document.getElementById("connectionStatus"),
     databaseSummary: document.getElementById("databaseSummary"),
 
     searchForm: document.getElementById("searchForm"),
     searchInput: document.getElementById("searchInput"),
     clearSearchButton: document.getElementById("clearSearchButton"),
-    searchButton: document.getElementById("searchButton"),
 
     filtersToggle: document.getElementById("filtersToggle"),
     filtersPanel: document.getElementById("filtersPanel"),
@@ -83,9 +89,7 @@
 
     detailModuleNumber: document.getElementById("detailModuleNumber"),
     detailValidity: document.getElementById("detailValidity"),
-    detailModuleDescription: document.getElementById(
-      "detailModuleDescription"
-    ),
+    detailModuleDescription: document.getElementById("detailModuleDescription"),
 
     detailElementType: document.getElementById("detailElementType"),
     detailElement: document.getElementById("detailElement"),
@@ -98,59 +102,64 @@
     detailGuidelines: document.getElementById("detailGuidelines"),
     detailExplanation: document.getElementById("detailExplanation"),
     detailApplication: document.getElementById("detailApplication"),
-    detailElementExplanation: document.getElementById(
-      "detailElementExplanation"
-    ),
+    detailElementExplanation: document.getElementById("detailElementExplanation"),
 
     guidelinesSection: document.getElementById("guidelinesSection"),
     explanationSection: document.getElementById("explanationSection"),
     applicationSection: document.getElementById("applicationSection"),
-    elementExplanationSection: document.getElementById(
-      "elementExplanationSection"
-    ),
+    elementExplanationSection: document.getElementById("elementExplanationSection"),
 
     copyModuleButton: document.getElementById("copyModuleButton"),
     copyWordingButton: document.getElementById("copyWordingButton"),
 
-    displayWordingButton: document.getElementById(
-      "displayWordingButton"
-    ),
+    displayWordingButton: document.getElementById("displayWordingButton"),
     rawWordingButton: document.getElementById("rawWordingButton"),
 
     toast: document.getElementById("toast")
   };
 
-  /* ============================================================
-     INITIALIZATION
-     ============================================================ */
 
   async function init() {
     bindEvents();
     updateClearButton();
 
-    try {
-      setConnectionStatus("checking");
+    setConnectionStatus("checking");
 
-      await loadMetadata();
+    const {
+      data: { session }
+    } = await db.auth.getSession();
 
-      setConnectionStatus("online");
-      state.initialized = true;
-    } catch (error) {
-      console.error(error);
-
-      setConnectionStatus("offline");
-      showError(
-        "The database connection could not be established. " +
-        "Check Supabase configuration and permissions."
-      );
+    if (session && session.user) {
+      await startAuthenticatedApp(session.user);
+    } else {
+      showLogin();
     }
+
+    db.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_OUT") {
+        resetApplication();
+        showLogin();
+      }
+
+      if (
+        (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") &&
+        session &&
+        session.user &&
+        !state.currentUser
+      ) {
+        await startAuthenticatedApp(session.user);
+      }
+    });
   }
 
-  /* ============================================================
-     EVENTS
-     ============================================================ */
 
   function bindEvents() {
+    el.loginForm.addEventListener("submit", handleLogin);
+
+    el.logoutButton.addEventListener("click", async () => {
+      await db.auth.signOut();
+    });
+
     el.searchForm.addEventListener("submit", async event => {
       event.preventDefault();
       await runSearch();
@@ -177,13 +186,7 @@
       });
     });
 
-    el.browseAllButton.addEventListener("click", async () => {
-      el.searchInput.value = "";
-      state.currentQuery = "";
-      updateClearButton();
-
-      await browseModules();
-    });
+    el.browseAllButton.addEventListener("click", browseModules);
 
     el.filtersToggle.addEventListener("click", () => {
       el.filtersPanel.hidden = !el.filtersPanel.hidden;
@@ -265,9 +268,104 @@
     });
   }
 
-  /* ============================================================
-     DATABASE METADATA
-     ============================================================ */
+
+  async function handleLogin(event) {
+    event.preventDefault();
+
+    el.loginError.hidden = true;
+    el.loginButton.disabled = true;
+    el.loginButton.textContent = "Signing in...";
+
+    const email = el.loginEmail.value.trim();
+    const password = el.loginPassword.value;
+
+    try {
+      const { data, error } = await db.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) throw error;
+
+      if (!data.user) {
+        throw new Error("Unable to authenticate.");
+      }
+
+      await startAuthenticatedApp(data.user);
+
+      el.loginPassword.value = "";
+    } catch (error) {
+      console.error(error);
+
+      el.loginError.textContent =
+        error.message || "Sign in failed.";
+
+      el.loginError.hidden = false;
+    } finally {
+      el.loginButton.disabled = false;
+      el.loginButton.textContent = "Sign in";
+    }
+  }
+
+
+  async function startAuthenticatedApp(user) {
+    if (state.currentUser) return;
+
+    state.currentUser = user;
+
+    el.userEmail.textContent = user.email || "";
+    el.authScreen.hidden = true;
+
+    try {
+      setConnectionStatus("checking");
+
+      await loadMetadata();
+
+      setConnectionStatus("online");
+      state.initialized = true;
+
+      showInitialState();
+    } catch (error) {
+      console.error(error);
+
+      setConnectionStatus("offline");
+
+      showError(
+        "The database could not be loaded. " +
+        "Check access permissions and Supabase configuration."
+      );
+    }
+  }
+
+
+  function showLogin() {
+    state.currentUser = null;
+
+    el.userEmail.textContent = "";
+    el.authScreen.hidden = false;
+
+    setConnectionStatus("offline");
+
+    setTimeout(() => {
+      el.loginEmail.focus();
+    }, 100);
+  }
+
+
+  function resetApplication() {
+    state.allMetadata = [];
+    state.rawResults = [];
+    state.displayedResults = [];
+    state.currentQuery = "";
+    state.currentModule = null;
+    state.currentUser = null;
+    state.initialized = false;
+
+    el.databaseSummary.textContent = "Authentication required";
+    el.resultsGrid.innerHTML = "";
+    closeDrawer();
+  }
+
 
   async function loadMetadata() {
     const pageSize = 1000;
@@ -277,8 +375,7 @@
     while (true) {
       const { data, error } = await db
         .from("modules")
-        .select(
-          `
+        .select(`
           id,
           module,
           module_description,
@@ -290,8 +387,7 @@
           csm,
           reuse_ind,
           valid_flag
-          `
-        )
+        `)
         .range(from, from + pageSize - 1);
 
       if (error) throw error;
@@ -310,6 +406,7 @@
     updateDatabaseSummary();
   }
 
+
   function updateDatabaseSummary() {
     const total = state.allMetadata.length;
 
@@ -325,9 +422,6 @@
       `${invalid.toLocaleString()} invalid`;
   }
 
-  /* ============================================================
-     FILTER OPTIONS
-     ============================================================ */
 
   function populateFilters() {
     fillSelect(
@@ -360,6 +454,7 @@
 
     populateElementFilter();
   }
+
 
   function populateElementFilter() {
     const selectedType = el.elementTypeFilter.value;
@@ -394,6 +489,7 @@
     }
   }
 
+
   function uniqueSorted(items) {
     const map = new Map();
 
@@ -407,6 +503,7 @@
       String(a.label).localeCompare(String(b.label))
     );
   }
+
 
   function fillSelect(select, items, firstLabel) {
     select.innerHTML = "";
@@ -426,11 +523,13 @@
     });
   }
 
-  /* ============================================================
-     SEARCH
-     ============================================================ */
 
   async function runSearch() {
+    if (!state.currentUser) {
+      showLogin();
+      return;
+    }
+
     const query = el.searchInput.value.trim();
 
     if (!query) {
@@ -484,6 +583,7 @@
     }
   }
 
+
   async function findInvalidExactModule(query) {
     const { data, error } = await db
       .from("modules")
@@ -500,11 +600,13 @@
     return data && data.length ? data[0] : null;
   }
 
-  /* ============================================================
-     BROWSE
-     ============================================================ */
 
   async function browseModules() {
+    if (!state.currentUser) {
+      showLogin();
+      return;
+    }
+
     state.currentQuery = "";
 
     showLoading();
@@ -512,8 +614,7 @@
     try {
       let request = db
         .from("modules")
-        .select(
-          `
+        .select(`
           id,
           module,
           module_description,
@@ -531,8 +632,7 @@
           explanation,
           application,
           element_explanation
-          `
-        )
+        `)
         .order("module", { ascending: true })
         .limit(500);
 
@@ -557,9 +657,6 @@
     }
   }
 
-  /* ============================================================
-     FILTER + SORT
-     ============================================================ */
 
   function applyFiltersAndSort() {
     let results = [...state.rawResults];
@@ -614,9 +711,7 @@
         String(a.module || "").localeCompare(
           String(b.module || ""),
           undefined,
-          {
-            numeric: true
-          }
+          { numeric: true }
         )
       );
     }
@@ -646,9 +741,6 @@
     updateActiveFilterCount();
   }
 
-  /* ============================================================
-     RESULTS
-     ============================================================ */
 
   function renderResults() {
     hideAllStates();
@@ -668,8 +760,8 @@
     }
 
     el.resultsTitle.textContent = state.currentQuery
-      ? `Search results`
-      : `Modules`;
+      ? "Search results"
+      : "Modules";
 
     el.resultsMeta.textContent =
       `${count.toLocaleString()} module` +
@@ -686,6 +778,7 @@
       );
     });
   }
+
 
   function createModuleCard(module) {
     const card = document.createElement("article");
@@ -819,9 +912,6 @@
     return card;
   }
 
-  /* ============================================================
-     SNIPPETS
-     ============================================================ */
 
   function selectBestSnippet(module, query) {
     const fields = [
@@ -836,17 +926,11 @@
     if (!query) {
       for (const [label, value] of fields) {
         if (value) {
-          return {
-            label,
-            text: value
-          };
+          return { label, text: value };
         }
       }
 
-      return {
-        label: "",
-        text: ""
-      };
+      return { label: "", text: "" };
     }
 
     const normalizedQuery = query.toLowerCase();
@@ -856,27 +940,19 @@
         value &&
         value.toLowerCase().includes(normalizedQuery)
       ) {
-        return {
-          label,
-          text: value
-        };
+        return { label, text: value };
       }
     }
 
     for (const [label, value] of fields) {
       if (value) {
-        return {
-          label,
-          text: value
-        };
+        return { label, text: value };
       }
     }
 
-    return {
-      label: "",
-      text: ""
-    };
+    return { label: "", text: "" };
   }
+
 
   function trimSnippet(text, query) {
     if (!text) return "";
@@ -914,11 +990,8 @@
     );
   }
 
-  function appendHighlightedText(
-    container,
-    text,
-    query
-  ) {
+
+  function appendHighlightedText(container, text, query) {
     if (!query) {
       container.textContent = text;
       return;
@@ -958,76 +1031,51 @@
     );
   }
 
-  /* ============================================================
-     MODULE DETAIL
-     ============================================================ */
 
   async function openModule(id) {
     try {
-      const existing =
-        state.rawResults.find(row => row.id === id) ||
-        state.displayedResults.find(row => row.id === id);
-
-      let module = existing;
-
-      const hasFullDetail =
-        module &&
-        Object.prototype.hasOwnProperty.call(
+      const { data, error } = await db
+        .from("modules")
+        .select(`
+          id,
           module,
-          "element_explanation"
-        );
+          module_description,
+          element_type,
+          element_type_description,
+          element,
+          element_description,
+          component,
+          csm,
+          reuse_ind,
+          base_module,
+          valid_flag,
+          wording,
+          guidelines,
+          explanation,
+          application,
+          element_explanation
+        `)
+        .eq("id", id)
+        .single();
 
-      if (!hasFullDetail) {
-        const { data, error } = await db
-          .from("modules")
-          .select(
-            `
-            id,
-            module,
-            module_description,
-            element_type,
-            element_type_description,
-            element,
-            element_description,
-            component,
-            csm,
-            reuse_ind,
-            base_module,
-            valid_flag,
-            wording,
-            guidelines,
-            explanation,
-            application,
-            element_explanation
-            `
-          )
-          .eq("id", id)
-          .single();
+      if (error) throw error;
 
-        if (error) throw error;
-
-        module = data;
-      }
-
-      state.currentModule = module;
+      state.currentModule = data;
       state.wordingMode = "display";
 
       renderModuleDetail();
 
       el.drawerBackdrop.hidden = false;
       el.moduleDrawer.classList.add("open");
-      el.moduleDrawer.setAttribute(
-        "aria-hidden",
-        "false"
-      );
+      el.moduleDrawer.setAttribute("aria-hidden", "false");
 
       document.body.classList.add("drawer-open");
     } catch (error) {
       console.error(error);
-
       showToast("Unable to open module");
     }
   }
+
 
   function renderModuleDetail() {
     const module = state.currentModule;
@@ -1105,6 +1153,7 @@
     renderCurrentWording();
   }
 
+
   function renderCurrentWording() {
     const module = state.currentModule;
 
@@ -1129,6 +1178,7 @@
     }
   }
 
+
   function readableText(text) {
     if (!text) return "";
 
@@ -1140,11 +1190,8 @@
       .replace(/\[RO\]/gi, "");
   }
 
-  function setOptionalSection(
-    section,
-    contentElement,
-    value
-  ) {
+
+  function setOptionalSection(section, contentElement, value) {
     if (!value || !String(value).trim()) {
       section.hidden = true;
       return;
@@ -1154,10 +1201,8 @@
     contentElement.textContent = readableText(value);
   }
 
-  function combineCodeAndDescription(
-    code,
-    description
-  ) {
+
+  function combineCodeAndDescription(code, description) {
     if (code && description) {
       return `${description} (${code})`;
     }
@@ -1165,21 +1210,16 @@
     return description || code || "-";
   }
 
+
   function closeDrawer() {
     el.moduleDrawer.classList.remove("open");
-    el.moduleDrawer.setAttribute(
-      "aria-hidden",
-      "true"
-    );
+    el.moduleDrawer.setAttribute("aria-hidden", "true");
 
     el.drawerBackdrop.hidden = true;
 
     document.body.classList.remove("drawer-open");
   }
 
-  /* ============================================================
-     FILTER HELPERS
-     ============================================================ */
 
   function resetFilters() {
     el.elementTypeFilter.value = "";
@@ -1193,6 +1233,7 @@
 
     updateActiveFilterCount();
   }
+
 
   function updateActiveFilterCount() {
     let count = 0;
@@ -1208,9 +1249,6 @@
     el.activeFilterCount.hidden = count === 0;
   }
 
-  /* ============================================================
-     STATES
-     ============================================================ */
 
   function hideAllStates() {
     el.loadingState.hidden = true;
@@ -1218,6 +1256,7 @@
     el.emptyState.hidden = true;
     el.errorState.hidden = true;
   }
+
 
   function showLoading() {
     hideAllStates();
@@ -1229,6 +1268,7 @@
     el.resultsMeta.textContent = "Searching database...";
   }
 
+
   function showInitialState() {
     hideAllStates();
 
@@ -1239,6 +1279,7 @@
     el.resultsMeta.textContent =
       "Valid modules are shown by default.";
   }
+
 
   function showEmpty(message) {
     hideAllStates();
@@ -1259,6 +1300,7 @@
       "No matching modules found.";
   }
 
+
   function showError(message) {
     hideAllStates();
 
@@ -1270,9 +1312,6 @@
       "Database error.";
   }
 
-  /* ============================================================
-     CONNECTION STATUS
-     ============================================================ */
 
   function setConnectionStatus(status) {
     el.connectionStatus.classList.remove(
@@ -1294,7 +1333,7 @@
       );
 
       el.connectionStatus.textContent =
-        "Database unavailable";
+        "Signed out";
     } else {
       el.connectionStatus.classList.add(
         "connection-checking"
@@ -1305,14 +1344,12 @@
     }
   }
 
-  /* ============================================================
-     UTILITIES
-     ============================================================ */
 
   function updateClearButton() {
     el.clearSearchButton.hidden =
       !el.searchInput.value;
   }
+
 
   async function copyText(text) {
     if (navigator.clipboard) {
@@ -1334,6 +1371,7 @@
     textarea.remove();
   }
 
+
   let toastTimeout;
 
   function showToast(message) {
@@ -1347,9 +1385,6 @@
     }, 1800);
   }
 
-  /* ============================================================
-     START
-     ============================================================ */
 
   init();
 })();

@@ -3,300 +3,78 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <title>AMF - Module Finder</title>
-
-  <meta
-    name="description"
-    content="AMF Module Finder - fast module search and reference tool."
-  >
-
+  <meta name="description" content="AMF Module Finder - fast module search and reference tool.">
   <link rel="stylesheet" href="styles.css">
-
-  <style>
-    .auth-screen {
-      position: fixed;
-      inset: 0;
-      z-index: 500;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      background: #f8f8f8;
-    }
-
-    .auth-card {
-      width: min(420px, 100%);
-      background: #ffffff;
-      border: 1px solid #ececec;
-      border-top: 5px solid #dc0028;
-      border-radius: 16px;
-      padding: 32px;
-      box-shadow: 0 12px 35px rgba(0,0,0,0.08);
-    }
-
-    .auth-card h1 {
-      margin: 0;
-      color: #333333;
-      font-size: 26px;
-    }
-
-    .auth-card p {
-      margin: 8px 0 24px;
-      color: #828282;
-      font-size: 14px;
-    }
-
-    .auth-field {
-      margin-bottom: 16px;
-    }
-
-    .auth-field label {
-      display: block;
-      margin-bottom: 6px;
-      color: #505050;
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .auth-field input {
-      width: 100%;
-      height: 46px;
-      padding: 0 12px;
-      border: 1px solid #d9d9d9;
-      border-radius: 8px;
-      outline: none;
-      color: #333333;
-    }
-
-    .auth-field input:focus {
-      border-color: #dc0028;
-      box-shadow: 0 0 0 3px rgba(220,0,40,0.08);
-    }
-
-    .auth-submit {
-      width: 100%;
-      height: 46px;
-      margin-top: 4px;
-      border: 0;
-      border-radius: 8px;
-      background: #dc0028;
-      color: white;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    .auth-submit:hover {
-      background: #b90022;
-    }
-
-    .auth-error {
-      margin-top: 14px;
-      padding: 10px 12px;
-      border-radius: 8px;
-      background: #fdecef;
-      color: #a10f2d;
-      font-size: 12px;
-    }
-
-    .auth-info {
-      margin-top: 18px;
-      padding-top: 16px;
-      border-top: 1px solid #ececec;
-      color: #969696;
-      font-size: 11px;
-    }
-
-    .user-area {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .user-email {
-      max-width: 260px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: #828282;
-      font-size: 12px;
-    }
-
-    .logout-button {
-      border: 1px solid #d9d9d9;
-      border-radius: 8px;
-      background: white;
-      padding: 7px 10px;
-      color: #505050;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    .logout-button:hover {
-      border-color: #dc0028;
-      color: #dc0028;
-    }
-
-    @media (max-width: 700px) {
-      .user-email {
-        display: none;
-      }
-    }
-  </style>
 </head>
-
 <body>
 
-  <!-- =======================================================
-       LOGIN
-       ======================================================= -->
-
   <div id="authScreen" class="auth-screen">
-
     <div class="auth-card">
-
-      <h1>Module Finder</h1>
-
-      <p>
-        Sign in to access the module database.
-      </p>
+      <div class="auth-brand">
+        <div class="brand-mark"></div>
+        <div>
+          <h1>Module Finder</h1>
+          <p>Sign in to access the module database.</p>
+        </div>
+      </div>
 
       <form id="loginForm">
-
         <div class="auth-field">
           <label for="loginEmail">Email</label>
-
-          <input
-            id="loginEmail"
-            type="email"
-            autocomplete="username"
-            required
-          >
+          <input id="loginEmail" type="email" autocomplete="username" required>
         </div>
 
         <div class="auth-field">
           <label for="loginPassword">Password</label>
-
-          <input
-            id="loginPassword"
-            type="password"
-            autocomplete="current-password"
-            required
-          >
+          <input id="loginPassword" type="password" autocomplete="current-password" required>
         </div>
 
-        <button
-          id="loginButton"
-          class="auth-submit"
-          type="submit"
-        >
-          Sign in
-        </button>
-
-        <div
-          id="loginError"
-          class="auth-error"
-          hidden
-        ></div>
-
+        <button id="loginButton" class="auth-submit" type="submit">Sign in</button>
+        <div id="loginError" class="auth-error" hidden></div>
       </form>
 
-      <div class="auth-info">
-        Access is restricted to authorised users.
-      </div>
-
+      <div class="auth-info">Access is restricted to authorised users.</div>
     </div>
-
   </div>
-
-
-  <!-- =======================================================
-       APP HEADER
-       ======================================================= -->
 
   <header class="app-header">
     <div class="header-inner">
-
       <div class="brand">
         <div class="brand-mark"></div>
-
         <div class="brand-copy">
           <div class="brand-title-row">
             <h1>Module Finder</h1>
-            <span class="version-badge">v1.1</span>
+            <span class="version-badge">v1.2</span>
           </div>
-
           <p>Search policy modules, wording and guidance</p>
         </div>
       </div>
 
       <div class="user-area">
-
-        <span
-          id="connectionStatus"
-          class="connection-status connection-checking"
-        >
-          Connecting...
-        </span>
-
-        <span
-          id="userEmail"
-          class="user-email"
-        ></span>
-
-        <button
-          id="logoutButton"
-          class="logout-button"
-          type="button"
-        >
-          Sign out
-        </button>
-
+        <span id="connectionStatus" class="connection-status connection-checking">Connecting...</span>
+        <span id="userEmail" class="user-email"></span>
+        <button id="logoutButton" class="logout-button" type="button">Sign out</button>
       </div>
-
     </div>
   </header>
-
-
-  <!-- =======================================================
-       MAIN CONTENT
-       ======================================================= -->
 
   <main class="app-main">
 
     <section class="search-panel">
-
       <div class="search-heading">
         <div>
           <h2>Find a module</h2>
-          <p>
-            Search by module number, description, wording,
-            guidelines or explanation.
-          </p>
+          <p>Search by module number, description, wording, guidelines or explanation.</p>
         </div>
-
-        <div id="databaseSummary" class="database-summary">
-          Loading database...
-        </div>
+        <div id="databaseSummary" class="database-summary">Loading database...</div>
       </div>
 
-
       <form id="searchForm" class="search-form">
-
         <div class="search-row">
-
           <div class="search-input-wrapper">
-
             <span class="search-icon" aria-hidden="true">
-              <svg
-                viewBox="0 0 24 24"
-                width="21"
-                height="21"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-              >
+              <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2">
                 <circle cx="11" cy="11" r="7"></circle>
                 <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
               </svg>
@@ -312,136 +90,62 @@
               aria-label="Search modules"
             >
 
-            <button
-              id="clearSearchButton"
-              class="clear-search-button"
-              type="button"
-              title="Clear search"
-              aria-label="Clear search"
-              hidden
-            >
-              ×
-            </button>
-
+            <button id="clearSearchButton" class="clear-search-button" type="button" title="Clear search" aria-label="Clear search" hidden>×</button>
           </div>
 
-
-          <button
-            id="searchButton"
-            class="primary-button"
-            type="submit"
-          >
-            Search
-          </button>
-
+          <button id="searchButton" class="primary-button" type="submit">Search</button>
         </div>
-
 
         <div class="quick-search-row">
-
           <span class="quick-search-label">Try:</span>
-
-          <button
-            class="quick-search"
-            type="button"
-            data-query="00130"
-          >
-            00130
-          </button>
-
-          <button
-            class="quick-search"
-            type="button"
-            data-query="CRM"
-          >
-            CRM
-          </button>
-
-          <button
-            class="quick-search"
-            type="button"
-            data-query="China"
-          >
-            China
-          </button>
-
-          <button
-            class="quick-search"
-            type="button"
-            data-query="bank"
-          >
-            bank
-          </button>
-
-          <button
-            class="quick-search"
-            type="button"
-            data-query="Dutch law"
-          >
-            Dutch law
-          </button>
-
+          <button class="quick-search" type="button" data-query="00130">00130</button>
+          <button class="quick-search" type="button" data-query="CRM">CRM</button>
+          <button class="quick-search" type="button" data-query="China">China</button>
+          <button class="quick-search" type="button" data-query="bank">bank</button>
+          <button class="quick-search" type="button" data-query="Dutch law">Dutch law</button>
         </div>
-
       </form>
 
-
       <div class="filters-wrapper">
-
         <div class="filters-header">
-
-          <button
-            id="filtersToggle"
-            class="filters-toggle"
-            type="button"
-          >
-            <span>Filters</span>
-            <span id="activeFilterCount" class="filter-count" hidden>0</span>
+          <button id="filtersToggle" class="filters-toggle" type="button" aria-expanded="false">
+            <span class="filters-toggle-left">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 6h16M7 12h10M10 18h4"></path>
+              </svg>
+              <span>Filters</span>
+              <span id="activeFilterCount" class="filter-count" hidden>0</span>
+            </span>
+            <span id="filtersChevron" class="filters-chevron">⌄</span>
           </button>
 
-          <button
-            id="resetFiltersButton"
-            class="text-button"
-            type="button"
-          >
-            Reset filters
-          </button>
-
+          <button id="resetFiltersButton" class="text-button" type="button">Reset filters</button>
         </div>
 
-
-        <div id="filtersPanel" class="filters-panel">
-
+        <div id="filtersPanel" class="filters-panel" hidden>
           <div class="filter-field">
             <label for="elementTypeFilter">Element Type</label>
-
             <select id="elementTypeFilter">
               <option value="">All Element Types</option>
             </select>
           </div>
 
-
           <div class="filter-field">
             <label for="elementFilter">Element</label>
-
             <select id="elementFilter">
               <option value="">All Elements</option>
             </select>
           </div>
 
-
           <div class="filter-field">
             <label for="componentFilter">Component</label>
-
             <select id="componentFilter">
               <option value="">All Components</option>
             </select>
           </div>
 
-
           <div class="filter-field">
             <label for="csmFilter">CSM</label>
-
             <select id="csmFilter">
               <option value="">All</option>
               <option value="Y">Yes</option>
@@ -449,10 +153,8 @@
             </select>
           </div>
 
-
           <div class="filter-field">
             <label for="reuseFilter">ReUseInd</label>
-
             <select id="reuseFilter">
               <option value="">All</option>
               <option value="G">G</option>
@@ -461,83 +163,56 @@
             </select>
           </div>
 
-
           <div class="filter-checkbox-field">
-
             <label class="checkbox-label">
-              <input
-                id="includeInvalid"
-                type="checkbox"
-              >
-
+              <input id="includeInvalid" type="checkbox">
               <span class="checkbox-custom"></span>
-
-              <span>
-                Include invalid / obsolete
-              </span>
+              <span>Include invalid / obsolete</span>
             </label>
-
           </div>
-
         </div>
-
       </div>
-
     </section>
 
+    <section id="recentSection" class="recent-section" hidden>
+      <div class="section-heading-row">
+        <div>
+          <h2>Recently viewed</h2>
+          <p>Your most recently opened modules on this device.</p>
+        </div>
+        <button id="clearRecentButton" class="text-button" type="button">Clear</button>
+      </div>
+      <div id="recentModules" class="recent-modules"></div>
+    </section>
 
     <section class="results-section">
-
       <div class="results-toolbar">
-
         <div>
           <h2 id="resultsTitle">Modules</h2>
-
-          <p id="resultsMeta">
-            Valid modules are shown by default.
-          </p>
+          <p id="resultsMeta">Valid modules are shown by default.</p>
         </div>
 
         <div class="results-toolbar-right">
-
-          <label for="sortSelect" class="sort-label">
-            Sort
-          </label>
-
+          <label for="sortSelect" class="sort-label">Sort</label>
           <select id="sortSelect" class="sort-select">
             <option value="relevance">Best match</option>
             <option value="module_asc">Module number</option>
             <option value="description_asc">Description</option>
           </select>
-
         </div>
-
       </div>
 
-
       <div id="loadingState" class="state-card" hidden>
-
         <div class="loader"></div>
-
         <div>
           <h3>Searching modules...</h3>
           <p>Please wait a moment.</p>
         </div>
-
       </div>
 
-
       <div id="initialState" class="state-card">
-
         <div class="state-icon">
-          <svg
-            viewBox="0 0 24 24"
-            width="30"
-            height="30"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-          >
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8">
             <circle cx="11" cy="11" r="7"></circle>
             <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
           </svg>
@@ -545,35 +220,14 @@
 
         <div>
           <h3>Search the module database</h3>
-
-          <p>
-            Enter a module number or describe what you are looking for.
-            You can also browse all valid modules.
-          </p>
-
-          <button
-            id="browseAllButton"
-            class="secondary-button"
-            type="button"
-          >
-            Browse all valid modules
-          </button>
+          <p>Enter a module number or describe what you are looking for. You can also browse all valid modules.</p>
+          <button id="browseAllButton" class="secondary-button" type="button">Browse all valid modules</button>
         </div>
-
       </div>
 
-
       <div id="emptyState" class="state-card" hidden>
-
         <div class="state-icon">
-          <svg
-            viewBox="0 0 24 24"
-            width="30"
-            height="30"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-          >
+          <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.8">
             <circle cx="11" cy="11" r="7"></circle>
             <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
           </svg>
@@ -581,121 +235,83 @@
 
         <div>
           <h3>No matching modules found</h3>
-
-          <p id="emptyStateMessage">
-            Try another phrase or broaden the filters.
-          </p>
+          <p id="emptyStateMessage">Try another phrase or broaden the filters.</p>
         </div>
-
       </div>
-
 
       <div id="errorState" class="state-card state-error" hidden>
-
         <div class="state-icon">!</div>
-
         <div>
           <h3>Unable to load modules</h3>
-
-          <p id="errorMessage">
-            Check the database connection and try again.
-          </p>
+          <p id="errorMessage">Check the database connection and try again.</p>
         </div>
-
       </div>
 
-
-      <div
-        id="resultsGrid"
-        class="results-grid"
-        aria-live="polite"
-      ></div>
-
+      <div id="resultsGrid" class="results-grid" aria-live="polite"></div>
     </section>
-
   </main>
 
+  <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
 
-  <div
-    id="drawerBackdrop"
-    class="drawer-backdrop"
-    hidden
-  ></div>
-
-
-  <aside
-    id="moduleDrawer"
-    class="module-drawer"
-    aria-hidden="true"
-  >
-
+  <aside id="moduleDrawer" class="module-drawer" aria-hidden="true">
     <div class="drawer-header">
-
       <div class="drawer-heading">
-
         <div class="module-number-row">
-
-          <span id="detailModuleNumber" class="detail-module-number">
-            -
-          </span>
-
-          <span
-            id="detailValidity"
-            class="validity-badge"
-          >
-            -
-          </span>
-
+          <span id="detailModuleNumber" class="detail-module-number">-</span>
+          <span id="detailValidity" class="validity-badge">-</span>
         </div>
-
-        <h2 id="detailModuleDescription">
-          Module
-        </h2>
-
+        <h2 id="detailModuleDescription">Module</h2>
       </div>
 
-
-      <button
-        id="closeDrawerButton"
-        class="drawer-close-button"
-        type="button"
-        aria-label="Close module details"
-      >
-        ×
-      </button>
-
+      <button id="closeDrawerButton" class="drawer-close-button" type="button" aria-label="Close module details">×</button>
     </div>
 
+    <div id="invalidWarning" class="invalid-warning" hidden>
+      <strong>Invalid / obsolete module</strong>
+      <span>This wording should not be used without verification.</span>
+    </div>
 
     <div class="drawer-actions">
-
-      <button
-        id="copyModuleButton"
-        class="secondary-button"
-        type="button"
-      >
-        Copy module number
-      </button>
-
-      <button
-        id="copyWordingButton"
-        class="secondary-button"
-        type="button"
-      >
-        Copy exact wording
-      </button>
-
+      <button id="copyWordingButton" class="primary-button compact-button" type="button">Copy full module</button>
+      <button id="copyModuleButton" class="secondary-button" type="button">Copy module number</button>
     </div>
 
-
     <div class="drawer-content">
+      <section class="detail-section detail-section-wording">
+        <div class="detail-section-header">
+          <h3>Official Wording</h3>
+          <div class="wording-view-switch">
+            <button id="displayWordingButton" class="view-switch-button active" type="button">Readable</button>
+            <button id="rawWordingButton" class="view-switch-button" type="button">Raw</button>
+          </div>
+        </div>
 
-      <section class="detail-section">
+        <div id="detailWording" class="wording-box">No wording available.</div>
+      </section>
 
+      <section id="guidelinesSection" class="detail-section">
+        <h3>Guidelines</h3>
+        <div id="detailGuidelines" class="detail-text">-</div>
+      </section>
+
+      <section id="explanationSection" class="detail-section">
+        <h3>Explanation</h3>
+        <div id="detailExplanation" class="detail-text">-</div>
+      </section>
+
+      <section id="applicationSection" class="detail-section">
+        <h3>Application</h3>
+        <div id="detailApplication" class="detail-text">-</div>
+      </section>
+
+      <section id="elementExplanationSection" class="detail-section">
+        <h3>Element Explanation</h3>
+        <div id="detailElementExplanation" class="detail-text">-</div>
+      </section>
+
+      <section class="detail-section classification-section">
         <h3>Classification</h3>
-
         <div class="detail-grid">
-
           <div class="detail-field">
             <span class="detail-label">Element Type</span>
             <span id="detailElementType" class="detail-value">-</span>
@@ -725,122 +341,20 @@
             <span class="detail-label">Base Module</span>
             <span id="detailBaseModule" class="detail-value">-</span>
           </div>
-
         </div>
-
       </section>
-
-
-      <section class="detail-section">
-
-        <div class="detail-section-header">
-
-          <h3>Official Wording</h3>
-
-          <div class="wording-view-switch">
-
-            <button
-              id="displayWordingButton"
-              class="view-switch-button active"
-              type="button"
-            >
-              Readable
-            </button>
-
-            <button
-              id="rawWordingButton"
-              class="view-switch-button"
-              type="button"
-            >
-              Raw
-            </button>
-
-          </div>
-
-        </div>
-
-
-        <div
-          id="detailWording"
-          class="wording-box"
-        >
-          No wording available.
-        </div>
-
-      </section>
-
-
-      <section
-        id="guidelinesSection"
-        class="detail-section"
-      >
-        <h3>Guidelines</h3>
-        <div id="detailGuidelines" class="detail-text">-</div>
-      </section>
-
-
-      <section
-        id="explanationSection"
-        class="detail-section"
-      >
-        <h3>Explanation</h3>
-        <div id="detailExplanation" class="detail-text">-</div>
-      </section>
-
-
-      <section
-        id="applicationSection"
-        class="detail-section"
-      >
-        <h3>Application</h3>
-        <div id="detailApplication" class="detail-text">-</div>
-      </section>
-
-
-      <section
-        id="elementExplanationSection"
-        class="detail-section"
-      >
-        <h3>Element Explanation</h3>
-        <div id="detailElementExplanation" class="detail-text">-</div>
-      </section>
-
     </div>
-
   </aside>
 
-
-  <div
-    id="toast"
-    class="toast"
-    role="status"
-    aria-live="polite"
-    hidden
-  >
-    Copied
-  </div>
-
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden>Copied</div>
 
   <footer class="app-footer">
-
-    <div>
-      AMF Module Finder
-    </div>
-
-    <div>
-      Database content remains the source of truth.
-    </div>
-
+    <div>AMF Module Finder</div>
+    <div>Database content remains the source of truth.</div>
   </footer>
 
-
   <script src="config.js"></script>
-
-  <script
-    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"
-  ></script>
-
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="app.js"></script>
-
 </body>
 </html>

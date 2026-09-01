@@ -1323,3 +1323,17 @@ body.drawer-open { overflow: hidden; }
   border-color: rgba(46, 139, 87, .18);
   background: rgba(46, 139, 87, .04);
 }
+
+/* v1.7 - AI similarity diagnostics */
+.ai-similarity-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,0,0,.12);
+  background: rgba(0,0,0,.035);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}

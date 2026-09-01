@@ -703,30 +703,36 @@
 
     const keywordScore = calculateClientPriorityScore(module, query);
     const similarity = Number(module.semantic_similarity || 0);
-    const semanticRank = Number(module.semantic_rank || 20);
-    const rankBoost = Math.max(0, 25000 - semanticRank * 750);
+    const semanticRank = Number(module.semantic_rank || 50);
 
     /*
-      Natural-language searches should be driven primarily by meaning.
-      Short searches such as "CRM", "China" or "Dutch law" still retain
-      stronger keyword influence.
+      v1.7:
+      Natural-language searches are semantic-first.
+      Keyword matching is only a small tie-breaker.
     */
     if (naturalLanguageQuery) {
-      if (module.semantic_match && module.keyword_match) {
-        return 800000 +
-          Math.round(similarity * 120000) +
-          rankBoost;
-      }
-
       if (module.semantic_match) {
-        return 760000 +
-          Math.round(similarity * 120000) +
-          rankBoost;
+        const semanticScore =
+          600000 + Math.round(similarity * 250000);
+
+        const keywordTieBreaker = module.keyword_match
+          ? Math.min(
+              8000,
+              Math.max(0, Math.round(keywordScore / 40))
+            )
+          : 0;
+
+        const semanticRankTieBreaker =
+          Math.max(0, 1000 - semanticRank * 20);
+
+        return semanticScore +
+          keywordTieBreaker +
+          semanticRankTieBreaker;
       }
 
       if (module.keyword_match) {
-        return 500000 +
-          Math.min(keywordScore, 180000);
+        return 350000 +
+          Math.min(keywordScore, 120000);
       }
 
       return keywordScore;
@@ -734,7 +740,7 @@
 
     if (module.keyword_match) {
       const semanticBoost = module.semantic_match
-        ? Math.round(similarity * 50000)
+        ? Math.round(similarity * 40000)
         : 0;
 
       return keywordScore + semanticBoost;
@@ -743,7 +749,7 @@
     if (module.semantic_match) {
       return 300000 +
         Math.round(similarity * 100000) +
-        rankBoost;
+        Math.max(0, 1000 - semanticRank * 20);
     }
 
     return keywordScore;
@@ -995,6 +1001,14 @@
         ? "This result matched both the normal search and the AI semantic search."
         : "This result was found through semantic similarity.";
       numberLine.appendChild(semanticBadge);
+
+      const similarityBadge = document.createElement("span");
+      similarityBadge.className = "ai-similarity-badge";
+      similarityBadge.textContent =
+        `AI match: ${formatSimilarityPercent(module.semantic_similarity)}`;
+      similarityBadge.title =
+        "Diagnostic semantic similarity score used for ranking.";
+      numberLine.appendChild(similarityBadge);
     }
 
     const title = document.createElement("h3");
@@ -1567,6 +1581,16 @@
 
   function updateClearButton() {
     el.clearSearchButton.hidden = !el.searchInput.value;
+  }
+
+  function formatSimilarityPercent(value) {
+    const similarity = Number(value || 0);
+
+    if (!Number.isFinite(similarity)) {
+      return "0%";
+    }
+
+    return `${Math.round(similarity * 100)}%`;
   }
 
   function escapeHtml(value) {

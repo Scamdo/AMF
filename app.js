@@ -46,7 +46,10 @@
     initialized: false,
     recentModules: [],
     aiSearchAvailable: true,
-    lastSearchUsedAI: false
+    lastSearchUsedAI: false,
+    feedbackMemoryAvailable: true,
+    currentFeedbackTarget: null,
+    isFeedbackApprover: false
   };
 
   const el = {
@@ -142,6 +145,7 @@
   };
 
   async function init() {
+    installFeedbackUi();
     bindEvents();
     updateClearButton();
     loadRecentModules();
@@ -359,6 +363,7 @@
     try {
       setConnectionStatus("checking");
       await loadMetadata();
+      await checkFeedbackApprover();
       setConnectionStatus("online");
       state.initialized = true;
       renderRecentModules();
@@ -575,14 +580,17 @@
       });
 
       const semanticPromise = runSemanticSearch(query);
+      const feedbackMemoryPromise = runFeedbackMemorySearch(query);
 
-      const [keywordResult, semanticResult] = await Promise.allSettled([
+      const [keywordResult, semanticResult, feedbackMemoryResult] = await Promise.allSettled([
         keywordPromise,
-        semanticPromise
+        semanticPromise,
+        feedbackMemoryPromise
       ]);
 
       let keywordRows = [];
       let semanticRows = [];
+      let feedbackMemoryRows = [];
 
       if (keywordResult.status === "fulfilled") {
         const result = keywordResult.value;
@@ -604,11 +612,15 @@
         setAiSearchStatus("fallback");
       }
 
-      state.rawResults = mergeHybridResults(
-        keywordRows,
-        semanticRows,
-        query
-      );
+      if (feedbackMemoryResult.status === "fulfilled") {
+        feedbackMemoryRows = feedbackMemoryResult.value || [];
+        state.feedbackMemoryAvailable = true;
+      } else {
+        console.warn("Feedback memory unavailable:", feedbackMemoryResult.reason);
+        state.feedbackMemoryAvailable = false;
+      }
+
+      state.rawResults = mergeHybridResults(keywordRows, semanticRows, query, feedbackMemoryRows);
 
       applyFiltersAndSort();
     } catch (error) {
@@ -645,7 +657,7 @@
       }));
   }
 
-  function mergeHybridResults(keywordRows, semanticRows, query) {
+  function mergeHybridResults(keywordRows, semanticRows, query, feedbackMemoryRows = []) {
     const merged = new Map();
 
     keywordRows.forEach((row, index) => {
@@ -681,6 +693,27 @@
           semantic_match: true,
           semantic_similarity: Number(row.semantic_similarity || row.similarity || 0),
           semantic_rank: row.semantic_rank || index + 1
+        });
+      }
+    });
+
+    const feedbackByModule = new Map();
+    feedbackMemoryRows.forEach(memory => {
+      const moduleId = String(memory.preferred_module_id || "");
+      if (!moduleId) return;
+      const existing = feedbackByModule.get(moduleId);
+      if (!existing || Number(memory.similarity || 0) > Number(existing.similarity || 0)) {
+        feedbackByModule.set(moduleId, memory);
+      }
+    });
+
+    feedbackByModule.forEach((memory, moduleId) => {
+      const existing = merged.get(moduleId);
+      if (existing) {
+        merged.set(moduleId, {
+          ...existing,
+          feedback_memory_match: true,
+          feedback_memory_similarity: Number(memory.similarity || 0)
         });
       }
     });
@@ -730,9 +763,19 @@
         const semanticRankTieBreaker =
           Math.max(0, 100 - semanticRank);
 
+        const feedbackBoost =
+          module.feedback_memory_match &&
+          Number(module.feedback_memory_similarity || 0) >= 0.82
+            ? Math.min(
+                12000,
+                Math.round((Number(module.feedback_memory_similarity || 0) - 0.82) * 60000) + 1500
+              )
+            : 0;
+
         return semanticScore +
           keywordTieBreaker +
-          semanticRankTieBreaker;
+          semanticRankTieBreaker +
+          feedbackBoost;
       }
 
       // Keyword-only results remain available below semantic matches.
@@ -1021,6 +1064,14 @@
       numberLine.appendChild(similarityBadge);
     }
 
+    if (module.feedback_memory_match) {
+      const memoryBadge = document.createElement("span");
+      memoryBadge.className = "feedback-memory-badge";
+      memoryBadge.textContent = "Expert learned";
+      memoryBadge.title = "Approved expert feedback from a similar previous search contributed to this ranking.";
+      numberLine.appendChild(memoryBadge);
+    }
+
     const title = document.createElement("h3");
     title.className = "module-description";
     title.textContent = module.module_description || "No module description";
@@ -1092,6 +1143,32 @@
 
       snippet.append(label, content);
       card.appendChild(snippet);
+    }
+
+    if (state.currentQuery) {
+      const feedbackActions = document.createElement("div");
+      feedbackActions.className = "feedback-actions";
+
+      const goodButton = document.createElement("button");
+      goodButton.type = "button";
+      goodButton.className = "feedback-good-button";
+      goodButton.textContent = "👍 Good match";
+      goodButton.addEventListener("click", async event => {
+        event.stopPropagation();
+        await submitGoodMatchFeedback(module);
+      });
+
+      const betterButton = document.createElement("button");
+      betterButton.type = "button";
+      betterButton.className = "feedback-better-button";
+      betterButton.textContent = "🎯 Better module";
+      betterButton.addEventListener("click", event => {
+        event.stopPropagation();
+        openBetterModuleFeedback(module);
+      });
+
+      feedbackActions.append(goodButton, betterButton);
+      card.appendChild(feedbackActions);
     }
 
     card.addEventListener("click", () => openModule(module.id));
@@ -1854,6 +1931,277 @@
     textarea.select();
     document.execCommand("copy");
     textarea.remove();
+  }
+
+
+  async function checkFeedbackApprover() {
+    try {
+      const { data, error } = await db
+        .from("feedback_approvers")
+        .select("user_id")
+        .eq("user_id", state.currentUser.id)
+        .maybeSingle();
+
+      if (error) throw error;
+      state.isFeedbackApprover = Boolean(data);
+      el.feedbackAdminButton.hidden = !state.isFeedbackApprover;
+    } catch (error) {
+      console.warn("Feedback approver check unavailable:", error);
+      state.isFeedbackApprover = false;
+      el.feedbackAdminButton.hidden = true;
+    }
+  }
+
+  async function runFeedbackMemorySearch(query) {
+    const { data, error } = await db.functions.invoke("amf-feedback", {
+      body: { action: "match", query, match_count: 10 }
+    });
+    if (error) throw error;
+    if (!data || !Array.isArray(data.results)) return [];
+    return data.results.filter(row => Number(row.similarity || 0) >= 0.82);
+  }
+
+  function buildSearchSnapshot() {
+    return (state.displayedResults || []).slice(0, 5).map((row, index) => ({
+      rank: index + 1,
+      id: row.id,
+      module: row.module || "",
+      module_description: row.module_description || "",
+      semantic_similarity: Number(row.semantic_similarity || 0),
+      client_priority_score: Number(row.client_priority_score || 0)
+    }));
+  }
+
+  async function submitGoodMatchFeedback(module) {
+    try {
+      const { data, error } = await db.functions.invoke("amf-feedback", {
+        body: {
+          action: "submit",
+          feedback_type: "good_match",
+          query: state.currentQuery,
+          shown_module_id: module.id,
+          preferred_module_id: module.id,
+          comment: "",
+          results_snapshot: buildSearchSnapshot()
+        }
+      });
+      if (error) throw error;
+      if (!data || !data.success) throw new Error("Feedback was not saved.");
+      showToast("Feedback saved for review");
+    } catch (error) {
+      console.error(error);
+      showToast("Could not save feedback");
+    }
+  }
+
+  function openBetterModuleFeedback(module) {
+    state.currentFeedbackTarget = module;
+    el.feedbackModalTitle.textContent = "Better module";
+    el.feedbackModalSubtitle.textContent = "Suggest a better result. It will not influence ranking until approved.";
+    el.feedbackEntryView.hidden = false;
+    el.feedbackAdminView.hidden = true;
+    el.feedbackQueryText.textContent = state.currentQuery || "-";
+    el.feedbackSuggestedModule.value = module.module || "";
+    el.feedbackBetterModule.value = "";
+    el.feedbackComment.value = "";
+    el.feedbackBetterModuleHint.textContent = "";
+    el.feedbackBetterModuleHint.className = "feedback-hint";
+    openFeedbackModal();
+    window.setTimeout(() => el.feedbackBetterModule.focus(), 80);
+  }
+
+  async function validateBetterModuleInput() {
+    const value = el.feedbackBetterModule.value.trim();
+    el.feedbackBetterModuleHint.className = "feedback-hint";
+
+    if (!value) {
+      el.feedbackBetterModuleHint.textContent = "";
+      return null;
+    }
+
+    const module = state.allMetadata.find(
+      row => String(row.module || "").toLowerCase() === value.toLowerCase()
+    );
+
+    if (!module) {
+      el.feedbackBetterModuleHint.textContent = "Module not found.";
+      el.feedbackBetterModuleHint.classList.add("feedback-hint-error");
+      return null;
+    }
+
+    if (module.valid_flag !== "Y") {
+      el.feedbackBetterModuleHint.textContent = "Module is invalid / obsolete.";
+      el.feedbackBetterModuleHint.classList.add("feedback-hint-error");
+      return null;
+    }
+
+    el.feedbackBetterModuleHint.textContent =
+      module.module_description || "Valid module found.";
+    el.feedbackBetterModuleHint.classList.add("feedback-hint-ok");
+    return module;
+  }
+
+  async function submitBetterModuleFeedback() {
+    if (!state.currentFeedbackTarget || !state.currentQuery) return;
+    const preferred = await validateBetterModuleInput();
+    if (!preferred) {
+      showToast("Choose a valid module");
+      return;
+    }
+
+    el.feedbackSubmitButton.disabled = true;
+    el.feedbackSubmitButton.textContent = "Saving...";
+
+    try {
+      const { data, error } = await db.functions.invoke("amf-feedback", {
+        body: {
+          action: "submit",
+          feedback_type: "better_module",
+          query: state.currentQuery,
+          shown_module_id: state.currentFeedbackTarget.id,
+          preferred_module_id: preferred.id,
+          comment: el.feedbackComment.value.trim(),
+          results_snapshot: buildSearchSnapshot()
+        }
+      });
+      if (error) throw error;
+      if (!data || !data.success) throw new Error("Feedback was not saved.");
+      closeFeedbackModal();
+      showToast("Feedback saved for review");
+    } catch (error) {
+      console.error(error);
+      showToast("Could not save feedback");
+    } finally {
+      el.feedbackSubmitButton.disabled = false;
+      el.feedbackSubmitButton.textContent = "Save feedback";
+    }
+  }
+
+  function openFeedbackModal() {
+    el.feedbackModalBackdrop.hidden = false;
+    el.feedbackModal.hidden = false;
+  }
+
+  function closeFeedbackModal() {
+    el.feedbackModalBackdrop.hidden = true;
+    el.feedbackModal.hidden = true;
+    state.currentFeedbackTarget = null;
+  }
+
+  async function openFeedbackAdmin() {
+    if (!state.isFeedbackApprover) return;
+    el.feedbackModalTitle.textContent = "Feedback review";
+    el.feedbackModalSubtitle.textContent = "Approve only feedback that should influence future ranking.";
+    el.feedbackEntryView.hidden = true;
+    el.feedbackAdminView.hidden = false;
+    openFeedbackModal();
+    await loadPendingFeedback();
+  }
+
+  async function loadPendingFeedback() {
+    el.feedbackAdminList.innerHTML = '<div class="feedback-admin-empty">Loading...</div>';
+
+    try {
+      const { data, error } = await db
+        .from("module_feedback")
+        .select("id,query_text,comment,created_at,created_by_email,shown_module_id,preferred_module_id")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+
+      const ids = Array.from(new Set(
+        (data || []).flatMap(row => [row.shown_module_id, row.preferred_module_id]).filter(Boolean)
+      ));
+      const modulesById = new Map();
+
+      if (ids.length) {
+        const { data: modules, error: modulesError } = await db
+          .from("modules")
+          .select("id,module,module_description")
+          .in("id", ids);
+
+        if (modulesError) throw modulesError;
+        (modules || []).forEach(module => modulesById.set(String(module.id), module));
+      }
+
+      renderPendingFeedback(data || [], modulesById);
+    } catch (error) {
+      console.error(error);
+      el.feedbackAdminList.innerHTML =
+        '<div class="feedback-admin-empty">Could not load feedback.</div>';
+    }
+  }
+
+  function renderPendingFeedback(rows, modulesById) {
+    el.feedbackAdminList.innerHTML = "";
+
+    if (!rows.length) {
+      el.feedbackAdminList.innerHTML =
+        '<div class="feedback-admin-empty">No pending feedback.</div>';
+      return;
+    }
+
+    rows.forEach(row => {
+      const shownModule = modulesById.get(String(row.shown_module_id));
+      const preferredModule = modulesById.get(String(row.preferred_module_id));
+      const shown = shownModule
+        ? `${shownModule.module} - ${shownModule.module_description || ""}`
+        : "-";
+      const preferred = preferredModule
+        ? `${preferredModule.module} - ${preferredModule.module_description || ""}`
+        : "-";
+
+      const card = document.createElement("article");
+      card.className = "feedback-admin-card";
+
+      const title = document.createElement("h3");
+      title.textContent = row.query_text || "Search feedback";
+
+      const details = document.createElement("div");
+      details.innerHTML =
+        `<p><strong>Shown:</strong> ${escapeHtml(shown)}</p>` +
+        `<p><strong>Preferred:</strong> ${escapeHtml(preferred)}</p>` +
+        (row.comment
+          ? `<p><strong>Comment:</strong> ${escapeHtml(row.comment)}</p>`
+          : "") +
+        `<p class="feedback-admin-meta">${escapeHtml(row.created_by_email || "")} · ${escapeHtml(new Date(row.created_at).toLocaleString())}</p>`;
+
+      const actions = document.createElement("div");
+      actions.className = "feedback-admin-actions";
+
+      [["approved", "Approve"], ["rejected", "Reject"]].forEach(([decision, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className =
+          decision === "approved"
+            ? "primary-button compact-button"
+            : "secondary-button";
+        button.textContent = label;
+        button.addEventListener("click", () => reviewFeedback(row.id, decision));
+        actions.appendChild(button);
+      });
+
+      card.append(title, details, actions);
+      el.feedbackAdminList.appendChild(card);
+    });
+  }
+
+  async function reviewFeedback(feedbackId, decision) {
+    try {
+      const { data, error } = await db.functions.invoke("amf-feedback", {
+        body: { action: "review", feedback_id: feedbackId, decision }
+      });
+      if (error) throw error;
+      if (!data || !data.success) throw new Error("Review failed.");
+
+      showToast(decision === "approved" ? "Feedback approved" : "Feedback rejected");
+      await loadPendingFeedback();
+    } catch (error) {
+      console.error(error);
+      showToast("Could not review feedback");
+    }
   }
 
   function loadRecentModules() {

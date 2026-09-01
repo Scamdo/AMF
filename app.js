@@ -244,6 +244,31 @@
     });
 
     el.copyWordingButton.addEventListener("click", async () => {
+  if (!state.currentModule) return;
+
+  const wording = state.currentModule.wording || "";
+
+  if (!wording) {
+    showToast("No wording available");
+    return;
+  }
+
+  const moduleDescription =
+    state.currentModule.module_description || "Module";
+
+  const moduleNumber =
+    state.currentModule.module || "";
+
+  const heading =
+    `${moduleDescription} ${moduleNumber}`.trim();
+
+  const textToCopy =
+    `${heading}\n\n${readableText(wording)}`;
+
+  await copyText(textToCopy);
+
+  showToast("Module wording copied");
+});("click", async () => {
       if (!state.currentModule) return;
 
       const wording = state.currentModule.wording || "";

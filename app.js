@@ -147,7 +147,7 @@
 
   function installFeedbackUi() {
     const versionBadge = document.querySelector(".version-badge");
-    if (versionBadge) versionBadge.textContent = "v2.3";
+    if (versionBadge) versionBadge.textContent = "v2.4";
 
     if (!document.getElementById("feedbackAdminButton")) {
       const logoutButton = document.getElementById("logoutButton");
@@ -843,14 +843,14 @@
       const existing = feedbackByModule.get(moduleId);
       if (
         !existing ||
-        Number(memory.feedback_similarity || 0) > Number(existing.feedback_similarity || 0)
+        Number(memory.case_similarity || 0) > Number(existing.case_similarity || 0)
       ) {
         feedbackByModule.set(moduleId, memory);
       }
     });
 
     feedbackByModule.forEach((memory, moduleId) => {
-      const memorySimilarity = Number(memory.feedback_similarity || 0);
+      const memorySimilarity = Number(memory.case_similarity || 0);
       const existing = merged.get(moduleId);
 
       if (existing) {
@@ -858,7 +858,6 @@
           ...existing,
           feedback_memory_match: true,
           feedback_memory_similarity: memorySimilarity,
-          feedback_module_similarity: Number(memory.module_similarity || 0),
           feedback_candidate_injected: false
         });
         return;
@@ -880,7 +879,6 @@
         semantic_rank: null,
         feedback_memory_match: true,
         feedback_memory_similarity: memorySimilarity,
-        feedback_module_similarity: Number(memory.module_similarity || 0),
         feedback_candidate_injected: true
       });
     });
@@ -915,50 +913,39 @@
     */
     if (naturalLanguageQuery) {
       /*
-        v2.3:
-        Expert Memory is driven primarily by similarity to the approved expert
-        CASE, not by the preferred module's generic semantic profile.
+        v2.4 Expert Case Memory:
+        Expert knowledge is a precedent library.
+        If the CURRENT business case is sufficiently similar to an APPROVED
+        previous case, the preferred module from that case may enter ranking.
 
-        This is deliberate: module embeddings can contain broad insurance
-        language and are therefore only a secondary safety check.
+        We deliberately do NOT use the preferred module's embedding as the
+        activation gate. Module wording/explanations contain broad insurance
+        language and proved unreliable for business applicability.
       */
-      if (module.feedback_memory_match) {
-        const feedbackSimilarity =
+      if (
+        module.feedback_memory_match &&
+        Number(module.feedback_memory_similarity || 0) >= 0.70
+      ) {
+        const caseSimilarity =
           Number(module.feedback_memory_similarity || 0);
-        const moduleSimilarity =
-          Number(module.feedback_module_similarity || 0);
 
-        if (
-          feedbackSimilarity >= 0.84 &&
-          moduleSimilarity >= 0.30
-        ) {
-          const caseStrength =
-            Math.max(0, Math.min(1, (feedbackSimilarity - 0.84) / 0.16));
+        // A strong expert precedent should beat generic semantic matches,
+        // while weaker precedents receive a smaller boost.
+        const caseStrength =
+          Math.max(0, Math.min(1, (caseSimilarity - 0.70) / 0.30));
 
-          const expertBoost =
-            70000 + Math.round(caseStrength * 70000);
+        const memoryScore =
+          820000 +
+          Math.round(caseStrength * 160000);
 
-          const baseSemantic =
-            module.semantic_match
-              ? similarity
-              : moduleSimilarity;
-
-          const memoryScore =
-            600000 +
-            Math.round(baseSemantic * 300000) +
-            expertBoost;
-
-          if (!module.semantic_match) {
-            return memoryScore;
-          }
-
-          const semanticScoreForComparison =
-            600000 + Math.round(similarity * 300000);
-
-          if (memoryScore > semanticScoreForComparison) {
-            return memoryScore;
-          }
+        if (!module.semantic_match) {
+          return memoryScore;
         }
+
+        const semanticScoreForComparison =
+          600000 + Math.round(similarity * 300000);
+
+        return Math.max(memoryScore, semanticScoreForComparison);
       }
 
       if (module.semantic_match) {
@@ -1274,16 +1261,12 @@
       memoryBadge.textContent = module.feedback_candidate_injected
         ? "Expert candidate"
         : "Expert learned";
-      const feedbackPct = Math.round(
+      const casePct = Math.round(
         Number(module.feedback_memory_similarity || 0) * 100
       );
-      const modulePct = Math.round(
-        Number(module.feedback_module_similarity || 0) * 100
-      );
-
       memoryBadge.title = module.feedback_candidate_injected
-        ? `Expert candidate - previous case ${feedbackPct}% · module relevance ${modulePct}%`
-        : `Expert learned - previous case ${feedbackPct}% · module relevance ${modulePct}%`;
+        ? `Expert candidate - similar approved case ${casePct}%`
+        : `Expert learned - similar approved case ${casePct}%`;
       numberLine.appendChild(memoryBadge);
     }
 
@@ -1960,9 +1943,7 @@
           "Module";
 
         const moduleNumber = module.module || "";
-        const blocks = [
-          `${index + 1}. ${title} (${moduleNumber})`
-        ];
+        const blocks = [`${index + 1}. ${title} (${moduleNumber})`];
 
         if (hasText(module.wording)) {
           blocks.push(readableText(module.wording).trim());
@@ -1993,13 +1974,11 @@
           "Module";
 
         const moduleNumber = module.module || "";
-        const sections = [];
-
-        sections.push(
+        const sections = [
           `<strong>${escapeHtml(
             `${index + 1}. ${title} (${moduleNumber})`
           )}</strong>`
-        );
+        ];
 
         if (hasText(module.wording)) {
           sections.push(
@@ -2018,10 +1997,6 @@
           );
         }
 
-        /*
-          Use explicit <br><br> rather than relying on CSS margins.
-          Word / Outlook / Teams can strip or collapse clipboard CSS.
-        */
         return sections.join("<br><br>");
       })
       .join("<br><br><hr><br><br>");
@@ -2029,15 +2004,11 @@
 
   function appendPlainSection(blocks, label, value) {
     if (!hasText(value)) return;
-
-    blocks.push(
-      `${label}:\n\n${readableText(value).trim()}`
-    );
+    blocks.push(`${label}:\n\n${readableText(value).trim()}`);
   }
 
   function appendHtmlSection(blocks, label, value) {
     if (!hasText(value)) return;
-
     blocks.push(
       `<strong>${escapeHtml(label)}:</strong><br><br>${formatHtmlText(
         readableText(value).trim()
@@ -2177,22 +2148,13 @@
     if (!data || !Array.isArray(data.results)) return [];
 
     /*
-      v2.3:
-      Previous-case similarity is now calculated correctly by the backend.
-      Expert Memory only enters the candidate set when the CURRENT query is
-      genuinely close to the approved expert case.
-
-      Module relevance is retained as a secondary diagnostic / safety signal.
+      v2.4 Expert Case Memory
+      Compare CURRENT business case with PREVIOUS APPROVED business cases.
+      Do not use module-embedding relevance as an activation gate.
     */
-    return data.results.filter(row => {
-      const feedbackSimilarity = Number(row.feedback_similarity || 0);
-      const moduleSimilarity = Number(row.module_similarity || 0);
-
-      return (
-        feedbackSimilarity >= 0.84 &&
-        moduleSimilarity >= 0.30
-      );
-    });
+    return data.results.filter(row =>
+      Number(row.case_similarity || 0) >= 0.70
+    );
   }
 
   function buildSearchSnapshot() {

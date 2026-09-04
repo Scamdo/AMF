@@ -147,7 +147,7 @@
 
   function installFeedbackUi() {
     const versionBadge = document.querySelector(".version-badge");
-    if (versionBadge) versionBadge.textContent = "v2.1";
+    if (versionBadge) versionBadge.textContent = "v2.2";
 
     if (!document.getElementById("feedbackAdminButton")) {
       const logoutButton = document.getElementById("logoutButton");
@@ -843,14 +843,14 @@
       const existing = feedbackByModule.get(moduleId);
       if (
         !existing ||
-        Number(memory.similarity || 0) > Number(existing.similarity || 0)
+        Number(memory.feedback_similarity || 0) > Number(existing.feedback_similarity || 0)
       ) {
         feedbackByModule.set(moduleId, memory);
       }
     });
 
     feedbackByModule.forEach((memory, moduleId) => {
-      const memorySimilarity = Number(memory.similarity || 0);
+      const memorySimilarity = Number(memory.feedback_similarity || 0);
       const existing = merged.get(moduleId);
 
       if (existing) {
@@ -858,6 +858,8 @@
           ...existing,
           feedback_memory_match: true,
           feedback_memory_similarity: memorySimilarity,
+          feedback_module_similarity: Number(memory.module_similarity || 0),
+          feedback_guard_score: Number(memory.guard_score || 0),
           feedback_candidate_injected: false
         });
         return;
@@ -879,6 +881,8 @@
         semantic_rank: null,
         feedback_memory_match: true,
         feedback_memory_similarity: memorySimilarity,
+        feedback_module_similarity: Number(memory.module_similarity || 0),
+        feedback_guard_score: Number(memory.guard_score || 0),
         feedback_candidate_injected: true
       });
     });
@@ -913,33 +917,48 @@
     */
     if (naturalLanguageQuery) {
       /*
-        v2.1:
-        Approved expert memory is a first-class ranking signal.
-        This also allows a preferred module that was missing from the base
-        semantic/keyword candidate set to enter the ranking.
+        v2.2:
+        Expert Memory is conditional, not absolute.
+        It may influence ranking only if:
+        - the current query is close to the approved expert case, AND
+        - the preferred module itself is relevant to the current query.
       */
-      if (
-        module.feedback_memory_match &&
-        Number(module.feedback_memory_similarity || 0) >= 0.82
-      ) {
-        const memorySimilarity =
+      if (module.feedback_memory_match) {
+        const feedbackSimilarity =
           Number(module.feedback_memory_similarity || 0);
+        const moduleSimilarity =
+          Number(module.feedback_module_similarity || 0);
+        const guardScore =
+          Number(module.feedback_guard_score || 0);
 
-        const memoryScore =
-          600000 +
-          Math.round(memorySimilarity * 300000) +
-          15000;
+        if (
+          feedbackSimilarity >= 0.82 &&
+          moduleSimilarity >= 0.35 &&
+          guardScore >= 0.72
+        ) {
+          const normalizedFeedback =
+            Math.max(0, Math.min(1, (feedbackSimilarity - 0.82) / 0.18));
 
-        if (!module.semantic_match) {
-          return memoryScore;
-        }
+          // Strong enough to resolve close business alternatives,
+          // but based on the module's own relevance to the current query.
+          const expertBoost =
+            60000 + Math.round(normalizedFeedback * 60000);
 
-        const semanticScoreForComparison =
-          600000 +
-          Math.round(similarity * 300000);
+          const memoryScore =
+            600000 +
+            Math.round(moduleSimilarity * 300000) +
+            expertBoost;
 
-        if (memoryScore > semanticScoreForComparison) {
-          return memoryScore;
+          if (!module.semantic_match) {
+            return memoryScore;
+          }
+
+          const semanticScoreForComparison =
+            600000 + Math.round(similarity * 300000);
+
+          if (memoryScore > semanticScoreForComparison) {
+            return memoryScore;
+          }
         }
       }
 
@@ -1256,9 +1275,11 @@
       memoryBadge.textContent = module.feedback_candidate_injected
         ? "Expert candidate"
         : "Expert learned";
+      const feedbackPct = Math.round(Number(module.feedback_memory_similarity || 0) * 100);
+      const modulePct = Math.round(Number(module.feedback_module_similarity || 0) * 100);
       memoryBadge.title = module.feedback_candidate_injected
-        ? "This module was added to the candidate set because approved expert feedback matched this search."
-        : "Approved expert feedback from a similar previous search contributed to this ranking.";
+        ? `Expert candidate - previous case ${feedbackPct}% · module relevance ${modulePct}%`
+        : `Expert learned - previous case ${feedbackPct}% · module relevance ${modulePct}%`;
       numberLine.appendChild(memoryBadge);
     }
 
@@ -1935,28 +1956,26 @@
           "Module";
 
         const moduleNumber = module.module || "";
-        const parts = [
-          `${index + 1}. ${title} (${moduleNumber})`
-        ];
+        const blocks = [`${index + 1}. ${title} (${moduleNumber})`];
 
         if (hasText(module.wording)) {
-          parts.push("", readableText(module.wording));
+          blocks.push(readableText(module.wording).trim());
         }
 
         if (mode === "full") {
-          appendPlainSection(parts, "Guidelines", module.guidelines);
-          appendPlainSection(parts, "Explanation", module.explanation);
-          appendPlainSection(parts, "Application", module.application);
+          appendPlainSection(blocks, "Guidelines", module.guidelines);
+          appendPlainSection(blocks, "Explanation", module.explanation);
+          appendPlainSection(blocks, "Application", module.application);
           appendPlainSection(
-            parts,
+            blocks,
             "Element Explanation",
             module.element_explanation
           );
         }
 
-        return parts.join("\\n");
+        return blocks.join("\n\n");
       })
-      .join("\\n\\n----------------------------------------\\n\\n");
+      .join("\n\n----------------------------------------\n\n");
   }
 
   function buildTopFiveHtml(modules, mode) {
@@ -1968,53 +1987,50 @@
           "Module";
 
         const moduleNumber = module.module || "";
-
-        const sections = [
-          `<div><strong>${escapeHtml(
+        const blocks = [
+          `<div style="margin:0 0 14px 0;"><strong>${escapeHtml(
             `${index + 1}. ${title} (${moduleNumber})`
           )}</strong></div>`
         ];
 
         if (hasText(module.wording)) {
-          sections.push(
-            `<div style="margin-top:10px;">${formatHtmlText(
-              readableText(module.wording)
+          blocks.push(
+            `<div style="margin:0 0 18px 0;line-height:1.55;">${formatHtmlText(
+              readableText(module.wording).trim()
             )}</div>`
           );
         }
 
         if (mode === "full") {
-          appendHtmlSection(sections, "Guidelines", module.guidelines);
-          appendHtmlSection(sections, "Explanation", module.explanation);
-          appendHtmlSection(sections, "Application", module.application);
+          appendHtmlSection(blocks, "Guidelines", module.guidelines);
+          appendHtmlSection(blocks, "Explanation", module.explanation);
+          appendHtmlSection(blocks, "Application", module.application);
           appendHtmlSection(
-            sections,
+            blocks,
             "Element Explanation",
             module.element_explanation
           );
         }
 
-        return `<div style="margin-bottom:22px;">${sections.join("")}</div>`;
+        return `<div style="margin-bottom:28px;">${blocks.join("")}</div>`;
       })
-      .join('<hr style="border:0;border-top:1px solid #ccc;margin:18px 0;">');
+      .join(
+        '<div style="border-top:1px solid #ccc;margin:26px 0 30px 0;"></div>'
+      );
   }
 
-  function appendPlainSection(parts, label, value) {
+  function appendPlainSection(blocks, label, value) {
     if (!hasText(value)) return;
-
-    parts.push(
-      "",
-      `${label}:`,
-      readableText(value)
-    );
+    blocks.push(`${label}:\n\n${readableText(value).trim()}`);
   }
 
-  function appendHtmlSection(parts, label, value) {
+  function appendHtmlSection(blocks, label, value) {
     if (!hasText(value)) return;
 
-    parts.push(
-      `<div style="margin-top:12px;"><strong>${escapeHtml(label)}:</strong><br>${formatHtmlText(
-        readableText(value)
+    blocks.push(
+      `<div style="margin:18px 0 8px 0;"><strong>${escapeHtml(label)}:</strong></div>` +
+      `<div style="margin:0 0 18px 0;line-height:1.55;">${formatHtmlText(
+        readableText(value).trim()
       )}</div>`
     );
   }
@@ -2148,7 +2164,17 @@
     });
     if (error) throw error;
     if (!data || !Array.isArray(data.results)) return [];
-    return data.results.filter(row => Number(row.similarity || 0) >= 0.82);
+    return data.results.filter(row => {
+      const feedbackSimilarity = Number(row.feedback_similarity || 0);
+      const moduleSimilarity = Number(row.module_similarity || 0);
+      const guardScore = Number(row.guard_score || 0);
+
+      return (
+        feedbackSimilarity >= 0.82 &&
+        moduleSimilarity >= 0.35 &&
+        guardScore >= 0.72
+      );
+    });
   }
 
   function buildSearchSnapshot() {

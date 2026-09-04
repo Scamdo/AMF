@@ -147,7 +147,7 @@
 
   function installFeedbackUi() {
     const versionBadge = document.querySelector(".version-badge");
-    if (versionBadge) versionBadge.textContent = "v2.2";
+    if (versionBadge) versionBadge.textContent = "v2.3";
 
     if (!document.getElementById("feedbackAdminButton")) {
       const logoutButton = document.getElementById("logoutButton");
@@ -859,7 +859,6 @@
           feedback_memory_match: true,
           feedback_memory_similarity: memorySimilarity,
           feedback_module_similarity: Number(memory.module_similarity || 0),
-          feedback_guard_score: Number(memory.guard_score || 0),
           feedback_candidate_injected: false
         });
         return;
@@ -882,7 +881,6 @@
         feedback_memory_match: true,
         feedback_memory_similarity: memorySimilarity,
         feedback_module_similarity: Number(memory.module_similarity || 0),
-        feedback_guard_score: Number(memory.guard_score || 0),
         feedback_candidate_injected: true
       });
     });
@@ -917,36 +915,37 @@
     */
     if (naturalLanguageQuery) {
       /*
-        v2.2:
-        Expert Memory is conditional, not absolute.
-        It may influence ranking only if:
-        - the current query is close to the approved expert case, AND
-        - the preferred module itself is relevant to the current query.
+        v2.3:
+        Expert Memory is driven primarily by similarity to the approved expert
+        CASE, not by the preferred module's generic semantic profile.
+
+        This is deliberate: module embeddings can contain broad insurance
+        language and are therefore only a secondary safety check.
       */
       if (module.feedback_memory_match) {
         const feedbackSimilarity =
           Number(module.feedback_memory_similarity || 0);
         const moduleSimilarity =
           Number(module.feedback_module_similarity || 0);
-        const guardScore =
-          Number(module.feedback_guard_score || 0);
 
         if (
-          feedbackSimilarity >= 0.82 &&
-          moduleSimilarity >= 0.35 &&
-          guardScore >= 0.72
+          feedbackSimilarity >= 0.84 &&
+          moduleSimilarity >= 0.30
         ) {
-          const normalizedFeedback =
-            Math.max(0, Math.min(1, (feedbackSimilarity - 0.82) / 0.18));
+          const caseStrength =
+            Math.max(0, Math.min(1, (feedbackSimilarity - 0.84) / 0.16));
 
-          // Strong enough to resolve close business alternatives,
-          // but based on the module's own relevance to the current query.
           const expertBoost =
-            60000 + Math.round(normalizedFeedback * 60000);
+            70000 + Math.round(caseStrength * 70000);
+
+          const baseSemantic =
+            module.semantic_match
+              ? similarity
+              : moduleSimilarity;
 
           const memoryScore =
             600000 +
-            Math.round(moduleSimilarity * 300000) +
+            Math.round(baseSemantic * 300000) +
             expertBoost;
 
           if (!module.semantic_match) {
@@ -1275,8 +1274,13 @@
       memoryBadge.textContent = module.feedback_candidate_injected
         ? "Expert candidate"
         : "Expert learned";
-      const feedbackPct = Math.round(Number(module.feedback_memory_similarity || 0) * 100);
-      const modulePct = Math.round(Number(module.feedback_module_similarity || 0) * 100);
+      const feedbackPct = Math.round(
+        Number(module.feedback_memory_similarity || 0) * 100
+      );
+      const modulePct = Math.round(
+        Number(module.feedback_module_similarity || 0) * 100
+      );
+
       memoryBadge.title = module.feedback_candidate_injected
         ? `Expert candidate - previous case ${feedbackPct}% · module relevance ${modulePct}%`
         : `Expert learned - previous case ${feedbackPct}% · module relevance ${modulePct}%`;
@@ -1956,7 +1960,9 @@
           "Module";
 
         const moduleNumber = module.module || "";
-        const blocks = [`${index + 1}. ${title} (${moduleNumber})`];
+        const blocks = [
+          `${index + 1}. ${title} (${moduleNumber})`
+        ];
 
         if (hasText(module.wording)) {
           blocks.push(readableText(module.wording).trim());
@@ -1975,7 +1981,7 @@
 
         return blocks.join("\n\n");
       })
-      .join("\n\n----------------------------------------\n\n");
+      .join("\n\n\n----------------------------------------\n\n\n");
   }
 
   function buildTopFiveHtml(modules, mode) {
@@ -1987,51 +1993,55 @@
           "Module";
 
         const moduleNumber = module.module || "";
-        const blocks = [
-          `<div style="margin:0 0 14px 0;"><strong>${escapeHtml(
+        const sections = [];
+
+        sections.push(
+          `<strong>${escapeHtml(
             `${index + 1}. ${title} (${moduleNumber})`
-          )}</strong></div>`
-        ];
+          )}</strong>`
+        );
 
         if (hasText(module.wording)) {
-          blocks.push(
-            `<div style="margin:0 0 18px 0;line-height:1.55;">${formatHtmlText(
-              readableText(module.wording).trim()
-            )}</div>`
+          sections.push(
+            formatHtmlText(readableText(module.wording).trim())
           );
         }
 
         if (mode === "full") {
-          appendHtmlSection(blocks, "Guidelines", module.guidelines);
-          appendHtmlSection(blocks, "Explanation", module.explanation);
-          appendHtmlSection(blocks, "Application", module.application);
+          appendHtmlSection(sections, "Guidelines", module.guidelines);
+          appendHtmlSection(sections, "Explanation", module.explanation);
+          appendHtmlSection(sections, "Application", module.application);
           appendHtmlSection(
-            blocks,
+            sections,
             "Element Explanation",
             module.element_explanation
           );
         }
 
-        return `<div style="margin-bottom:28px;">${blocks.join("")}</div>`;
+        /*
+          Use explicit <br><br> rather than relying on CSS margins.
+          Word / Outlook / Teams can strip or collapse clipboard CSS.
+        */
+        return sections.join("<br><br>");
       })
-      .join(
-        '<div style="border-top:1px solid #ccc;margin:26px 0 30px 0;"></div>'
-      );
+      .join("<br><br><hr><br><br>");
   }
 
   function appendPlainSection(blocks, label, value) {
     if (!hasText(value)) return;
-    blocks.push(`${label}:\n\n${readableText(value).trim()}`);
+
+    blocks.push(
+      `${label}:\n\n${readableText(value).trim()}`
+    );
   }
 
   function appendHtmlSection(blocks, label, value) {
     if (!hasText(value)) return;
 
     blocks.push(
-      `<div style="margin:18px 0 8px 0;"><strong>${escapeHtml(label)}:</strong></div>` +
-      `<div style="margin:0 0 18px 0;line-height:1.55;">${formatHtmlText(
+      `<strong>${escapeHtml(label)}:</strong><br><br>${formatHtmlText(
         readableText(value).trim()
-      )}</div>`
+      )}`
     );
   }
 
@@ -2162,17 +2172,25 @@
     const { data, error } = await db.functions.invoke("amf-feedback", {
       body: { action: "match", query, match_count: 10 }
     });
+
     if (error) throw error;
     if (!data || !Array.isArray(data.results)) return [];
+
+    /*
+      v2.3:
+      Previous-case similarity is now calculated correctly by the backend.
+      Expert Memory only enters the candidate set when the CURRENT query is
+      genuinely close to the approved expert case.
+
+      Module relevance is retained as a secondary diagnostic / safety signal.
+    */
     return data.results.filter(row => {
       const feedbackSimilarity = Number(row.feedback_similarity || 0);
       const moduleSimilarity = Number(row.module_similarity || 0);
-      const guardScore = Number(row.guard_score || 0);
 
       return (
-        feedbackSimilarity >= 0.82 &&
-        moduleSimilarity >= 0.35 &&
-        guardScore >= 0.72
+        feedbackSimilarity >= 0.84 &&
+        moduleSimilarity >= 0.30
       );
     });
   }
